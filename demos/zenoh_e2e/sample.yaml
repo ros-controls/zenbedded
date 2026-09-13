@@ -1,16 +1,146 @@
 sample:
-  description: Zenoh E2E test, testing sending message from the host to the firmware
+  description: Configurable bidirectional Zenoh E2E string-message test
   name: zenoh e2e
 common:
   harness: pytest
-  harness_config:
-    pytest_dut_scope: function
-    pytest_args:
-      - '-p'
-      - 'no:launch_testing'
-      - '-p'
-      - 'no:launch_ros'
 tests:
-  sample.zenbedded.zenoh_e2e:
+  sample.zenbedded.zenoh_e2e.ingress_frequent:
     platform_allow:
       - native_sim/native/64
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=n
+      - CONFIG_ZENOH_E2E_PERIOD_MS=1000
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_ingress_frequent'
+
+  sample.zenbedded.zenoh_e2e.ingress_infrequent:
+    platform_allow:
+      - native_sim/native/64
+    timeout: 125
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=n
+      - CONFIG_ZENOH_E2E_PERIOD_MS=15000
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_ingress_infrequent'
+
+  sample.zenbedded.zenoh_e2e.ingress_after_lease_idle:
+    platform_allow:
+      - native_sim/native/64
+    timeout: 35
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=n
+      - CONFIG_ZENOH_E2E_PERIOD_MS=1000
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_ingress_after_lease_idle'
+
+  sample.zenbedded.zenoh_e2e.egress_frequent:
+    platform_allow:
+      - native_sim/native/64
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=n
+      - CONFIG_ZENOH_E2E_EGRESS=y
+      - CONFIG_ZENOH_E2E_PERIOD_MS=1000
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_egress_frequent'
+
+  sample.zenbedded.zenoh_e2e.egress_infrequent:
+    platform_allow:
+      - native_sim/native/64
+    timeout: 75
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=n
+      - CONFIG_ZENOH_E2E_EGRESS=y
+      - CONFIG_ZENOH_E2E_PERIOD_MS=15000
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_egress_infrequent'
+
+  sample.zenbedded.zenoh_e2e.issue_65_outbound_only_reconnect:
+    platform_allow:
+      - native_sim/native/64
+    timeout: 75
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=y
+      - CONFIG_ZENOH_E2E_PERIOD_MS=100
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_issue_65_outbound_only_reconnect'
+
+  sample.zenbedded.zenoh_e2e.bidirectional_frequent:
+    platform_allow:
+      - native_sim/native/64
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=y
+      - CONFIG_ZENOH_E2E_PERIOD_MS=1000
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_bidirectional_frequent'
+
+  sample.zenbedded.zenoh_e2e.bidirectional_infrequent:
+    platform_allow:
+      - native_sim/native/64
+    timeout: 75
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=y
+      - CONFIG_ZENOH_E2E_PERIOD_MS=15000
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_bidirectional_infrequent'
