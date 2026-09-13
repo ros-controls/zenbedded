@@ -38,6 +38,10 @@ constexpr uint32_t kControlPeriodMs = 10;
 constexpr double kControlPeriodSec = kControlPeriodMs / 1000.0;
 constexpr uint32_t kCommandTimeoutMs = 200;
 
+// Low-pass filter coefficient for encoder velocity (0.0 < alpha <= 1.0)
+// Lower values = smoother but more delay. Higher values = more responsive but noisier.
+constexpr double kVelocityFilterAlpha = 0.5;
+
 // A stale command must stop the stepper rather than latch the last velocity forever.
 constexpr uint32_t kCommandTimeoutCycles = kCommandTimeoutMs / kControlPeriodMs;
 
@@ -90,6 +94,20 @@ int32_t stepper_max_position = 0;
 double microsteps_to_angle(int32_t microsteps)
 {
   return 2.0 * M_PI * microsteps / micro_steps_per_rev;
+}
+
+// maps angle to [-pi, pi]
+double wrap_angle(double angle)
+{
+  if (angle > M_PI)
+  {
+    angle -= 2.0 * M_PI;
+  }
+  else if (angle <= -M_PI)
+  {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
 }
 
 void stop_stepper()
@@ -295,6 +313,9 @@ int main()
   double commanded_acceleration = 0.0;
   double prev_stepper_angle = stepper_angle;
   double prev_encoder_angle = encoder_angle;
+  double pendulum_joint_velocity = 0.0;
+  double loop_freq = 0.0;
+  uint32_t last_state_time = k_uptime_get_32();
 
   uint32_t led_toggle_counter = 0;
   bool is_led_red = true;
@@ -312,19 +333,15 @@ int main()
     if (get_encoder_angle_deg(&raw_encoder_angle))
     {
       double angle = fmod(raw_encoder_angle - encoder_angle_offset + M_PI, 2 * M_PI);
-      if (angle > M_PI)
-      {
-        angle -= 2.0 * M_PI;
-      }
-      else if (angle <= -M_PI)
-      {
-        angle += 2.0 * M_PI;
-      }
-      encoder_angle = angle;
+      encoder_angle = wrap_angle(angle);
     }
 
-    double motor_joint_velocity = (stepper_angle - prev_stepper_angle) / kControlPeriodSec;
-    double pendulum_joint_velocity = (encoder_angle - prev_encoder_angle) / kControlPeriodSec;
+    double dt = static_cast<double>(k_uptime_get_32() - last_state_time) / 1000.0;
+    last_state_time = k_uptime_get_32();
+    double motor_joint_velocity = (stepper_angle - prev_stepper_angle) / dt;
+    double raw_pendulum_velocity = wrap_angle(encoder_angle - prev_encoder_angle) / dt;
+    pendulum_joint_velocity = kVelocityFilterAlpha * raw_pendulum_velocity +
+                              (1 - kVelocityFilterAlpha) * pendulum_joint_velocity;
     prev_stepper_angle = stepper_angle;
     prev_encoder_angle = encoder_angle;
 
@@ -339,8 +356,8 @@ int main()
       print_count = 0;
       printk(
         "stepper_angle=%.4f rad, stepper_vel=%.4f rad/s, "
-        "encoder_angle=%.4f rad, encoder_vel=%.4f rad/s\n",
-        stepper_angle, motor_joint_velocity, encoder_angle, pendulum_joint_velocity);
+        "encoder_angle=%.4f rad, encoder_vel=%.4f rad/s\n, loop_freq=%.2f Hz",
+        stepper_angle, motor_joint_velocity, encoder_angle, pendulum_joint_velocity, loop_freq);
     }
 
     zenbedded_command_t cmd_val;
@@ -398,6 +415,7 @@ int main()
     uint32_t sleep_ms =
       (loop_duration_ms < kControlPeriodMs) ? kControlPeriodMs - loop_duration_ms : 1;
     k_sleep(K_MSEC(sleep_ms));
+    loop_freq = 1000.0 / (k_uptime_get_32() - loop_start_ms);
   }
 
   client.destroy();
