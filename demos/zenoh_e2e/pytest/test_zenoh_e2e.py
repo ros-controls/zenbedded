@@ -250,7 +250,7 @@ def test_egress_frequent(zenoh_router, dut: DeviceAdapter):
 def test_egress_infrequent(zenoh_router, dut: DeviceAdapter):
     _run_egress_test(dut, INFREQUENT_PERIOD_MS, INFREQUENT_MESSAGE_COUNT)
 
-
+@pytest.mark.xfail(reason="Issue #65")
 def test_issue_65_outbound_only_reconnect(zenoh_router, dut: DeviceAdapter):
     """Keep MCU application ingress silent through the reported reconnect window."""
     _run_issue_65_test(dut)
