@@ -12,14 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include <zenoh-pico.h>
 #include <zephyr/kernel.h>
 
 #define ENDPOINT "tcp/127.0.0.1:7447"
-#define TEST_TOPIC "zenbedded/e2e/test"
+#define INGRESS_TOPIC "zenbedded/e2e/ingress"
+#define EGRESS_TOPIC "zenbedded/e2e/egress"
+#define EGRESS_MESSAGE "hello from the firmware"
 
+#if defined(CONFIG_ZENOH_E2E_INGRESS)
+#define INGRESS_STATE "on"
+#else
+#define INGRESS_STATE "off"
+#endif
+
+#if defined(CONFIG_ZENOH_E2E_EGRESS)
+#define EGRESS_STATE "on"
+#else
+#define EGRESS_STATE "off"
+#endif
+
+#if defined(CONFIG_ZENOH_E2E_INGRESS)
 static void on_test_message(z_loaned_sample_t * sample, void * arg)
 {
   ARG_UNUSED(arg);
@@ -36,6 +53,7 @@ static void on_test_message(z_loaned_sample_t * sample, void * arg)
     z_string_data(z_loan(payload)));
   z_drop(z_move(payload));
 }
+#endif
 
 int main(void)
 {
@@ -70,15 +88,18 @@ int main(void)
     return 1;
   }
 
-  z_view_keyexpr_t keyexpr;
-  z_view_keyexpr_from_str_unchecked(&keyexpr, TEST_TOPIC);
+#if defined(CONFIG_ZENOH_E2E_INGRESS)
+  z_view_keyexpr_t ingress_keyexpr;
+  z_view_keyexpr_from_str_unchecked(&ingress_keyexpr, INGRESS_TOPIC);
 
-  z_owned_closure_sample_t callback;
-  z_closure(&callback, on_test_message, NULL, NULL);
+  z_owned_closure_sample_t ingress_callback;
+  z_closure(&ingress_callback, on_test_message, NULL, NULL);
 
-  z_owned_subscriber_t subscriber;
+  z_owned_subscriber_t ingress_subscriber;
   if (
-    z_declare_subscriber(z_loan(session), &subscriber, z_loan(keyexpr), z_move(callback), NULL) < 0)
+    z_declare_subscriber(
+      z_loan(session), &ingress_subscriber, z_loan(ingress_keyexpr), z_move(ingress_callback),
+      NULL) < 0)
   {
     printf("Zenoh subscriber declaration failed\n");
     zp_stop_lease_task(z_loan_mut(session));
@@ -86,12 +107,60 @@ int main(void)
     z_close(z_loan_mut(session), NULL);
     return 1;
   }
+#endif
 
-  printf("Zenoh client connected\n");
+#if defined(CONFIG_ZENOH_E2E_EGRESS)
+  z_view_keyexpr_t egress_keyexpr;
+  z_view_keyexpr_from_str_unchecked(&egress_keyexpr, EGRESS_TOPIC);
 
+  z_owned_publisher_t egress_publisher;
+  if (z_declare_publisher(z_loan(session), &egress_publisher, z_loan(egress_keyexpr), NULL) < 0)
+  {
+    printf("Zenoh publisher declaration failed\n");
+    zp_stop_lease_task(z_loan_mut(session));
+    zp_stop_read_task(z_loan_mut(session));
+    z_close(z_loan_mut(session), NULL);
+    return 1;
+  }
+#endif
+
+  printf("Zenoh client connected (ingress=%s, egress=%s)\n", INGRESS_STATE, EGRESS_STATE);
+
+#if defined(CONFIG_ZENOH_E2E_EGRESS)
+  bool egress_started = false;
+#endif
   for (;;)
   {
+#if defined(CONFIG_ZENOH_E2E_EGRESS)
+    if (!egress_started)
+    {
+      z_matching_status_t matching_status;
+      if (z_publisher_get_matching_status(z_loan(egress_publisher), &matching_status) < 0)
+      {
+        printf("Zenoh publisher matching status failed\n");
+        return 1;
+      }
+
+      if (!matching_status.matching)
+      {
+        k_sleep(K_MSEC(50));
+        continue;
+      }
+
+      egress_started = true;
+    }
+
+    z_owned_bytes_t payload;
+    z_bytes_from_static_buf(&payload, (const uint8_t *)EGRESS_MESSAGE, sizeof(EGRESS_MESSAGE) - 1);
+    if (z_publisher_put(z_loan(egress_publisher), z_move(payload), NULL) < 0)
+    {
+      printf("Zenoh test message publish failed\n");
+    }
+
+    k_sleep(K_SECONDS(1));
+#else
     k_sleep(K_FOREVER);
+#endif
   }
 
   return 0;

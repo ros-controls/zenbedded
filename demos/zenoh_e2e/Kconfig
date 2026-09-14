@@ -1,0 +1,19 @@
+mainmenu "Zenoh E2E Test"
+
+source "Kconfig.zephyr"
+
+menu "Zenoh E2E Test Configuration"
+
+config ZENOH_E2E_INGRESS
+    bool "Enable host-to-firmware test traffic"
+    default n
+    depends on ZENOH_PICO
+    select ZENOH_PICO_SUBSCRIPTION
+
+config ZENOH_E2E_EGRESS
+    bool "Enable firmware-to-host test traffic"
+    default n
+    depends on ZENOH_PICO
+    select ZENOH_PICO_PUBLICATION
+
+endmenu
