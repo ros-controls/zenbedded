@@ -22,7 +22,7 @@
 #define ENDPOINT "tcp/127.0.0.1:7447"
 #define INGRESS_TOPIC "zenbedded/e2e/ingress"
 #define EGRESS_TOPIC "zenbedded/e2e/egress"
-#define EGRESS_MESSAGE "hello from the firmware"
+#define EGRESS_MESSAGE_PREFIX "hello from the firmware: "
 
 #if defined(CONFIG_ZENOH_E2E_INGRESS)
 #define INGRESS_STATE "on"
@@ -124,9 +124,12 @@ int main(void)
   }
 #endif
 
-  printf("Zenoh client connected (ingress=%s, egress=%s)\n", INGRESS_STATE, EGRESS_STATE);
+  printf(
+    "Zenoh client connected (ingress=%s, egress=%s, period_ms=%d)\n", INGRESS_STATE, EGRESS_STATE,
+    CONFIG_ZENOH_E2E_PERIOD_MS);
 
 #if defined(CONFIG_ZENOH_E2E_EGRESS)
+  uint32_t message_sequence = 1;
   bool egress_started = false;
 #endif
   for (;;)
@@ -150,14 +153,21 @@ int main(void)
       egress_started = true;
     }
 
-    z_owned_bytes_t payload;
-    z_bytes_from_static_buf(&payload, (const uint8_t *)EGRESS_MESSAGE, sizeof(EGRESS_MESSAGE) - 1);
-    if (z_publisher_put(z_loan(egress_publisher), z_move(payload), NULL) < 0)
+    char message[64];
+    int message_length = snprintf(
+      message, sizeof(message), "%s%u", EGRESS_MESSAGE_PREFIX, (unsigned int)message_sequence++);
+    if (message_length > 0 && (size_t)message_length < sizeof(message))
     {
-      printf("Zenoh test message publish failed\n");
+      z_owned_bytes_t payload;
+      z_bytes_from_static_buf(&payload, (const uint8_t *)message, (size_t)message_length);
+
+      if (z_publisher_put(z_loan(egress_publisher), z_move(payload), NULL) < 0)
+      {
+        printf("Zenoh test message publish failed\n");
+      }
     }
 
-    k_sleep(K_SECONDS(1));
+    k_sleep(K_MSEC(CONFIG_ZENOH_E2E_PERIOD_MS));
 #else
     k_sleep(K_FOREVER);
 #endif
