@@ -16,4 +16,9 @@ config ZENOH_E2E_EGRESS
     depends on ZENOH_PICO
     select ZENOH_PICO_PUBLICATION
 
+config ZENOH_E2E_PERIOD_MS
+    int "Firmware egress publication period in milliseconds"
+    default 1000
+    range 1 60000
+
 endmenu
