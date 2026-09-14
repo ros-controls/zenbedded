@@ -1,0 +1,27 @@
+{
+  "name": "zephyr-zenoh-integration",
+
+  // "build": {
+  //   "dockerfile": "Dockerfile.devcontainer",
+  //   "context": "."
+  // },
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev-env",
+  "workspaceFolder": "/workspace",
+  "overrideCommand": false,
+
+  "remoteUser": "ubuntu",
+  "customizations": {
+    // "vscode": {
+    //   "settings": {
+    //     "terminal.integrated.defaultProfile.linux": "bash"
+    //   },
+    //   "extensions": [
+    //     "ms-vscode.cpptools",
+    //     "ms-python.python",
+    //     "ms-ros2.ros2",
+    //     "ms-vscode.cmake-tools"
+    //   ]
+    // }
+  }
+}

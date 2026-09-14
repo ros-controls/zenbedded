@@ -1,0 +1,11 @@
+FROM ghcr.io/ros-controls/zephyr-zenoh-integration/zephyr-zenoh-dev:latest
+
+RUN echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu \
+    && chmod 0440 /etc/sudoers.d/ubuntu
+
+RUN apt-get update \
+    && apt-get install -y git-lfs \
+    && rm -rf /var/lib/apt/lists/*
+
+# this dockerfile can be used to test some additional steps inside the container
+
