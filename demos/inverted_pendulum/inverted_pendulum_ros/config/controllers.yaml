@@ -13,8 +13,8 @@ inverted_pendulum_controller:
     pendulum_joint_vel_name: pendulum_joint/velocity
     motor_joint_command_name: motor_joint/acceleration
     balance_angle: 0.0
-    kp: 50.0
-    kd: 20.0
-    k_motor_pos: 0.0
-    k_motor_vel: 0.0
+    kp: 75.0
+    kd: 15.0
+    k_motor_pos: 10.0
+    k_motor_vel: 11.0
     max_acceleration: 30.0
