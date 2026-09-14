@@ -1,0 +1,13 @@
+<library path="inverted_pendulum_rl_controller">
+  <class name="inverted_pendulum_rl_controller/InvertedPendulumRlController"
+         type="inverted_pendulum_rl_controller::InvertedPendulumRlController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      DDPG reinforcement-learning balance controller for the Inverted pendulum.
+      Trains online in simulation (mock_pendulum_hardware) and, once
+      enable_training is set false with a trained actor checkpoint loaded,
+      runs actor-only inference against real hardware exposed through
+      ZenbeddedHardware (zenoh transport to the Zephyr firmware).
+    </description>
+  </class>
+</library>

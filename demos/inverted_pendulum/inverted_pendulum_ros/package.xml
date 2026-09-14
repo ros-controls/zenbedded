@@ -4,6 +4,7 @@
     <version>0.0.1</version>
     <description>launch for the Zenbedded inverted-pendulum demo</description>
     <maintainer email="itzkamalkant@gmail.com">kamal2730</maintainer>
+    <maintainer email="enejiohieku@gmail.com">Eneji Ohieku</maintainer>
     <license>Apache-2.0</license>
 
     <buildtool_depend>ament_cmake</buildtool_depend>
@@ -25,6 +26,7 @@
     <export>
         <build_type>ament_cmake</build_type>
         <controller_interface plugin="${prefix}/inverted_pendulum_controller.xml"/>
+        <controller_interface plugin="${prefix}/inverted_pendulum_rl_controller.xml"/>
         <hardware_interface plugin="${prefix}/mock_pendulum_hardware.xml"/>
     </export>
 </package>

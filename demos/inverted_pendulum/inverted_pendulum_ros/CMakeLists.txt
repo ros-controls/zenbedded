@@ -26,6 +26,17 @@ target_link_libraries(zenbedded_inverted_pendulum
 )
 pluginlib_export_plugin_description_file(controller_interface inverted_pendulum_controller.xml)
 
+add_library(zenbedded_inverted_pendulum_rl SHARED src/inverted_pendulum_rl_controller.cpp)
+target_include_directories(zenbedded_inverted_pendulum_rl PRIVATE include)
+target_link_libraries(zenbedded_inverted_pendulum_rl
+        PUBLIC
+        controller_interface::controller_interface
+        pluginlib::pluginlib
+        rclcpp::rclcpp
+        rclcpp_lifecycle::rclcpp_lifecycle
+)
+pluginlib_export_plugin_description_file(controller_interface inverted_pendulum_rl_controller.xml)
+
 add_library(mock_pendulum_hardware SHARED src/mock_pendulum_hardware.cpp)
 target_include_directories(mock_pendulum_hardware PRIVATE include)
 target_link_libraries(mock_pendulum_hardware
@@ -38,12 +49,12 @@ pluginlib_export_plugin_description_file(hardware_interface mock_pendulum_hardwa
 
 
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS zenbedded_inverted_pendulum mock_pendulum_hardware
+install(TARGETS zenbedded_inverted_pendulum zenbedded_inverted_pendulum_rl mock_pendulum_hardware
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
 )
-install(FILES inverted_pendulum_controller.xml mock_pendulum_hardware.xml
+install(FILES inverted_pendulum_controller.xml inverted_pendulum_rl_controller.xml mock_pendulum_hardware.xml
         DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY urdf config launch DESTINATION share/${PROJECT_NAME})
 

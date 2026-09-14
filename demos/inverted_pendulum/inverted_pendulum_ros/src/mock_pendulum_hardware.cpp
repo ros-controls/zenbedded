@@ -26,6 +26,20 @@
 namespace mock_pendulum_hardware
 {
 
+// Helper for wrapping the pendulum angle between -PI and PI (0 is upright, +/- PI is face down)
+static double wrap_angle(double angle)
+{
+  while (angle > M_PI)
+  {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle <= -M_PI)
+  {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
+
 CallbackReturn MockPendulumHardware::on_init(
   const hardware_interface::HardwareComponentInterfaceParams & params)
 {
@@ -34,21 +48,48 @@ CallbackReturn MockPendulumHardware::on_init(
     return CallbackReturn::ERROR;
   }
 
+  // Load exact URDF physical constraints for the Furuta pendulum.
+  // We provide these as defaults to act as a true simulation without strict XML parameter
+  // dependency.
+  m2_ = 0.014;  // Pendulum mass (14g)
+  l2_ = 0.051;  // Pendulum COM drop (51mm)
+  g_ = 9.81;
+  b2_ = 0.0001;  // Small pivot friction
+
+  // Calculate inertia about the pivot using the Parallel Axis Theorem (I_axis = I_xx + m*l^2)
+  // I_xx = 0.00000806 kg*m^2 from the URDF. Resulting J2_ ≈ 4.447e-5 kg*m^2
+  J2_ = 0.00000806 + (m2_ * l2_ * l2_);
+
+  // Initial angle: 180 degrees (M_PI) represents hanging face down
+  initial_q2_ = M_PI;
+
+  // Attempt to override with provided ros2_control hardware parameters if available
   try
   {
-    J1_ = std::stod(info_.hardware_parameters.at("J1"));
-    J2_ = std::stod(info_.hardware_parameters.at("J2"));
-    m2_ = std::stod(info_.hardware_parameters.at("m2"));
-    l2_ = std::stod(info_.hardware_parameters.at("l2"));
-    b1_ = std::stod(info_.hardware_parameters.at("b1"));
-    b2_ = std::stod(info_.hardware_parameters.at("b2"));
-    g_ = std::stod(info_.hardware_parameters.at("g"));
-    initial_q2_ = std::stod(info_.hardware_parameters.at("initial_q2"));
+    if (info_.hardware_parameters.count("m2"))
+    {
+      m2_ = std::stod(info_.hardware_parameters.at("m2"));
+    }
+    if (info_.hardware_parameters.count("l2"))
+    {
+      l2_ = std::stod(info_.hardware_parameters.at("l2"));
+    }
+    if (info_.hardware_parameters.count("b2"))
+    {
+      b2_ = std::stod(info_.hardware_parameters.at("b2"));
+    }
+    if (info_.hardware_parameters.count("g"))
+    {
+      g_ = std::stod(info_.hardware_parameters.at("g"));
+    }
+    if (info_.hardware_parameters.count("initial_q2"))
+    {
+      initial_q2_ = std::stod(info_.hardware_parameters.at("initial_q2"));
+    }
   }
   catch (const std::out_of_range &)
   {
-    RCLCPP_FATAL(rclcpp::get_logger("MockPendulumHardware"), "Missing required URDF parameter");
-    return CallbackReturn::ERROR;
+    RCLCPP_WARN(rclcpp::get_logger("MockPendulumHardware"), "Using default URDF exact parameters.");
   }
 
   hw_states_.resize(4, 0.0);
@@ -108,29 +149,47 @@ hardware_interface::return_type MockPendulumHardware::read(
   // Commanded acceleration applied directly to motor joint
   const double q1_ddot_cmd = hw_commands_[0];
 
-  // ---- Coupled 2-DOF Lagrangian dynamics ----
-  //
-  //   a11*q1'' + a12*q2'' = tau_motor - b1*q1' + J2*sin(q2)*q2'^2
-  //   a21*q1'' + a22*q2'' = -b2*q2' - m2*g*l2*sin(q2)
-  //
-  // For acceleration command mode, tau_motor is whatever torque produces
-  // the commanded q1_ddot. We substitute q1'' = q1_ddot_cmd and solve
-  // equation (2) for q2''.
-  //
-  // From (2):  q2'' = (-b2*q2' - m2*g*l2*sin(q2) - J2*cos(q2)*q1_ddot_cmd) / J2
+  // URDF-specific kinematics & constraints
+  const double r = 0.062;                 // Arm reach (arm_to_pendulum origin x-offset)
+  const double motor_limit = 2.35619449;  // Mechanical hard stops (+-135 deg)
+  const double max_velocity = 196.0;      // Firmware step-rate envelope
+
+  // ---- True Furuta Pendulum Lagrangian dynamics ----
+  // With angle 0 as upright, the pendulum experiences two primary torques:
+  // 1. Gravity torque acting to pull it away from the upright equilibrium: + m2 * g * l2 * sin(q2)
+  // 2. Fictitious force torque from the base arm's acceleration: - m2 * r * l2 * cos(q2) * q1_ddot
 
   const double sinq2 = std::sin(q2_);
   const double cosq2 = std::cos(q2_);
 
-  // Solve for pendulum acceleration given commanded motor acceleration
   const double q2_ddot =
-    (-b2_ * q2_dot_ - m2_ * g_ * l2_ * sinq2 - J2_ * cosq2 * q1_ddot_cmd) / J2_;
+    (m2_ * g_ * l2_ * sinq2 - m2_ * r * l2_ * cosq2 * q1_ddot_cmd - b2_ * q2_dot_) / J2_;
 
   // Semi-implicit Euler integration
   q1_dot_ += q1_ddot_cmd * dt;
+
+  // Enforce firmware max velocity
+  q1_dot_ = std::clamp(q1_dot_, -max_velocity, max_velocity);
+
   q1_ += q1_dot_ * dt;
+
+  // Enforce firmware hard stops for motor position
+  if (q1_ > motor_limit)
+  {
+    q1_ = motor_limit;
+    q1_dot_ = 0.0;  // Crash into hardstop zeroes out velocity
+  }
+  else if (q1_ < -motor_limit)
+  {
+    q1_ = -motor_limit;
+    q1_dot_ = 0.0;
+  }
+
   q2_dot_ += q2_ddot * dt;
   q2_ += q2_dot_ * dt;
+
+  // Wrap pendulum angle continuously between -pi and pi
+  q2_ = wrap_angle(q2_);
 
   // Publish all 4 state interfaces
   hw_states_[0] = q1_;
