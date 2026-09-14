@@ -81,3 +81,38 @@ def test_egress_message_is_received(zenoh_router, dut: DeviceAdapter):
         if subscriber is not None:
             subscriber.undeclare()
         session.close()
+
+
+def test_bidirectional_messages_are_exchanged(zenoh_router, dut: DeviceAdapter):
+    message = "hello from the host"
+    session = _open_session()
+    messages = queue.Queue()
+    publisher = None
+    subscriber = None
+
+    try:
+        subscriber = session.declare_subscriber(
+            EGRESS_TOPIC, lambda sample: messages.put(bytes(sample.payload))
+        )
+        _wait_for_ready(dut, ingress=True, egress=True)
+
+        publisher = session.declare_publisher(INGRESS_TOPIC)
+
+        deadline = time.monotonic() + 10
+        while not publisher.matching_status.matching:
+            assert time.monotonic() < deadline, "no matching subscriber within 10s"
+            time.sleep(0.05)
+
+        publisher.put(message)
+
+        lines = dut.readlines_until(regex=r"Received test message:", timeout=10)
+        assert any(f"Received test message: {message}" in line for line in lines)
+
+        payload = messages.get(timeout=10)
+        assert payload.decode("utf-8") == FIRMWARE_MESSAGE
+    finally:
+        if subscriber is not None:
+            subscriber.undeclare()
+        if publisher is not None:
+            publisher.undeclare()
+        session.close()
