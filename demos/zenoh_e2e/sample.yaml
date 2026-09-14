@@ -1,5 +1,5 @@
 sample:
-  description: Zenoh E2E test, testing sending message from the host to the firmware
+  description: Configurable Zenoh E2E string-message test
   name: zenoh e2e
 common:
   harness: pytest
@@ -11,6 +11,34 @@ common:
       - '-p'
       - 'no:launch_ros'
 tests:
-  sample.zenbedded.zenoh_e2e:
+  sample.zenbedded.zenoh_e2e.ingress:
     platform_allow:
       - native_sim/native/64
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=n
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_ingress_message_is_printed'
+
+  sample.zenbedded.zenoh_e2e.egress:
+    platform_allow:
+      - native_sim/native/64
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=n
+      - CONFIG_ZENOH_E2E_EGRESS=y
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_egress_message_is_received'
