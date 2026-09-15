@@ -38,21 +38,16 @@ constexpr uint32_t kControlPeriodMs = 10;
 constexpr double kControlPeriodSec = kControlPeriodMs / 1000.0;
 constexpr uint32_t kCommandTimeoutMs = 200;
 
-// Low-pass filter coefficient for encoder velocity (0.0 < alpha <= 1.0)
-// Lower values = smoother but more delay. Higher values = more responsive but noisier.
-constexpr double kVelocityFilterAlpha = 0.5;
-
 // A stale command must stop the stepper rather than latch the last velocity forever.
 constexpr uint32_t kCommandTimeoutCycles = kCommandTimeoutMs / kControlPeriodMs;
 
-// Bracket the commanded rate to what an A4988 can actually step; outside it, stop instead.
-constexpr uint64_t kMinMicrostepIntervalNs = 60000;
-constexpr uint64_t kMaxMicrostepIntervalNs = 1000000000;
-
-constexpr uint32_t motor_steps_per_rev = 200;
-
-// Hard travel limit on the stepper position, measured from the boot-time zero.
-constexpr double kStepperAngleLimitRad = 135.0 * M_PI / 180.0;
+// --- Fast encoder sampling params ---------------------------------------------
+// encoder sampling + velocity filtering runs in its own thread at kEncoderSampleHz.
+constexpr double kEncoderSampleHz = 400.0;
+constexpr uint32_t kEncoderSamplePeriodUs = static_cast<uint32_t>(1.0e6 / kEncoderSampleHz);
+constexpr double kVelocityFilterAlpha = 0.35;
+constexpr double kVelocityFilterTauSec =
+  (1 - kVelocityFilterAlpha) / (kVelocityFilterAlpha * kEncoderSampleHz);
 
 // How far ahead of the current control cycle to project the commanded velocity
 // before clamping and issuing it as a stepper_ctrl_move_to() target. 1.0 means
@@ -65,12 +60,9 @@ BUILD_ASSERT(
   DT_NODE_HAS_PROP(DT_ALIAS(stepper_driver), micro_step_res),
   "stepper_driver needs micro-step-res: without it the published angles are off by that factor");
 
+constexpr uint32_t motor_steps_per_rev = 200;
 constexpr uint32_t micro_step_res = DT_PROP_OR(DT_ALIAS(stepper_driver), micro_step_res, 1);
-constexpr int32_t micro_steps_per_rev = static_cast<int32_t>(motor_steps_per_rev * micro_step_res);
-
-// Fastest angular rate representable given kMinMicrostepIntervalNs.
-constexpr double kMaxAngularVelocityRadPerSec =
-  (1e9 / static_cast<double>(kMinMicrostepIntervalNs)) * (2.0 * M_PI) / micro_steps_per_rev;
+constexpr int32_t micro_steps_per_rev = motor_steps_per_rev * micro_step_res;
 
 const device * stepper_driver = DEVICE_DT_GET(DT_ALIAS(stepper_driver));
 const device * stepper_ctrl = DEVICE_DT_GET(DT_ALIAS(stepper_ctrl));
@@ -84,12 +76,21 @@ const device * led = DEVICE_DT_GET(DT_ALIAS(led_strip));
 static led_rgb pixels[STRIP_NUM_PIXELS];
 bool led_ready = false;
 
+// Hard travel limit on the stepper position, measured from the boot-time zero.
+constexpr double kStepperAngleLimitRad = 135.0 * M_PI / 180.0;
+
 // Absolute microstep bounds corresponding to +-kStepperAngleLimitRad around the
 // boot-time zero. Every move_to() target is clamped into this range before being
 // sent to the driver, so the driver's own step-generation logic - not a polling
 // loop - is what actually prevents stepping past the limit.
 int32_t stepper_min_position = 0;
 int32_t stepper_max_position = 0;
+
+constexpr double kMaxAngularVelocity = 7;            // rad/s
+constexpr uint64_t kMinMicrostepIntervalNs = 60000;  // stepper limit
+constexpr uint64_t kMaxMicrostepIntervalNs = 1000000000;
+constexpr uint64_t kStepIntervalForMaxVelNs =
+  static_cast<uint64_t>(1e9 * 2.0 * M_PI / (kMaxAngularVelocity * micro_steps_per_rev));
 
 double microsteps_to_angle(int32_t microsteps)
 {
@@ -130,14 +131,17 @@ void set_stepper_angular_vel(double rads_per_sec)
   double microsteps_per_sec = fabs(rads_per_sec) * micro_steps_per_rev / (2 * M_PI);
   double interval_ns = 1e9 / microsteps_per_sec;
 
-  if (interval_ns < kMinMicrostepIntervalNs)
+  if (
+    !isfinite(interval_ns) || interval_ns < kMinMicrostepIntervalNs ||
+    interval_ns > kMaxMicrostepIntervalNs)
   {
+    LOG_WRN("Commanded velocity %f rad/s out of range, stopping", rads_per_sec);
     stop_stepper();
     return;
   }
 
   interval_ns = std::clamp(
-    interval_ns, static_cast<double>(kMinMicrostepIntervalNs),
+    interval_ns, static_cast<double>(kStepIntervalForMaxVelNs),
     static_cast<double>(kMaxMicrostepIntervalNs));
 
   int ret = stepper_ctrl_set_microstep_interval(stepper_ctrl, static_cast<uint64_t>(interval_ns));
@@ -200,20 +204,90 @@ void enforce_stepper_hard_stop(double stepper_angle, double * stepper_angular_ve
   }
 }
 
+/// --- Fast encoder sampling thread -------------------------------------------
+struct EncoderState
+{
+  double angle = 0.0;
+  double velocity = 0.0;
+};
+
+K_SEM_DEFINE(g_pendulum_ready, 0, 1);
+K_MSGQ_DEFINE(encoder_state_msgq, sizeof(EncoderState), 5, 1);
+
+void encoder_sample_thread_entry(void *, void *, void *)
+{
+  double encoder_angle_offset = 0.0;
+  while (!get_encoder_angle_deg(&encoder_angle_offset))
+  {
+    LOG_WRN("Waiting for a valid encoder reading to calibrate the pendulum zero...");
+    k_sleep(K_MSEC(1000));
+  }
+
+  double prev_encoder_angle = 0.0;
+  bool have_prev = false;
+  bool signaled_ready = false;
+  uint32_t prev_time_us = k_cyc_to_us_floor32(k_cycle_get_32());
+  EncoderState encoder_state;
+
+  while (true)
+  {
+    uint32_t loop_start_us = k_cyc_to_us_floor32(k_cycle_get_32());
+
+    double raw_encoder_angle = 0.0;
+    if (get_encoder_angle_deg(&raw_encoder_angle))
+    {
+      double angle = wrap_angle(fmod(raw_encoder_angle - encoder_angle_offset + M_PI, 2 * M_PI));
+
+      uint32_t now_us = k_cyc_to_us_floor32(k_cycle_get_32());
+      double dt = static_cast<double>(now_us - prev_time_us) / 1.0e6;
+      prev_time_us = now_us;
+
+      if (have_prev && dt > 0.0)
+      {
+        double raw_velocity = wrap_angle(angle - prev_encoder_angle) / dt;
+        double alpha = dt / (kVelocityFilterTauSec + dt);
+
+        encoder_state.angle = angle;
+        encoder_state.velocity = alpha * raw_velocity + (1.0 - alpha) * encoder_state.velocity;
+
+        if (!signaled_ready)
+        {
+          signaled_ready = true;
+          k_sem_give(&g_pendulum_ready);
+        }
+      }
+      else
+      {
+        encoder_state.angle = angle;
+      }
+
+      k_msgq_put(&encoder_state_msgq, &encoder_state, K_NO_WAIT);
+
+      prev_encoder_angle = angle;
+      have_prev = true;
+    }
+
+    uint32_t elapsed_us = k_cyc_to_us_floor32(k_cycle_get_32()) - loop_start_us;
+    if (elapsed_us < kEncoderSamplePeriodUs)
+    {
+      k_sleep(K_USEC(kEncoderSamplePeriodUs - elapsed_us));
+    }
+    else
+    {
+      k_yield();
+    }
+  }
+}
+
+K_THREAD_STACK_DEFINE(encoder_sample_thread_stack, 1024);
+k_thread encoder_sample_thread;
+k_tid_t encoder_sample_thread_tid = k_thread_create(
+  &encoder_sample_thread, encoder_sample_thread_stack,
+  K_THREAD_STACK_SIZEOF(encoder_sample_thread_stack), encoder_sample_thread_entry, nullptr, nullptr,
+  nullptr, CONFIG_ENCODER_SAMPLING_THREAD_PRIORITY, 0, K_FOREVER);
+
 int main()
 {
-  if (!device_is_ready(stepper_driver) || !device_is_ready(stepper_ctrl))
-  {
-    LOG_ERR("Stepper devices not ready\n");
-    return 0;
-  }
-
-  if (!device_is_ready(encoder_driver))
-  {
-    LOG_ERR("Encoder device not ready\n");
-    return 0;
-  }
-
   // Set LEDs to Blue for the Setup Phase
   if (device_is_ready(led))
   {
@@ -225,6 +299,24 @@ int main()
   {
     LOG_WRN("LED device not ready");
   }
+
+  if (!device_is_ready(stepper_driver) || !device_is_ready(stepper_ctrl))
+  {
+    LOG_ERR("Stepper devices not ready\n");
+    return 0;
+  }
+
+  if (!device_is_ready(encoder_driver))
+  {
+    LOG_ERR("Encoder device not ready\n");
+    return 0;
+  }
+  else
+  {
+    k_thread_start(encoder_sample_thread_tid);
+  }
+
+  k_sem_take(&g_pendulum_ready, K_FOREVER);
 
   LOG_INF("Starting Inverted Pendulum Tier2");
   net_if * iface = net_if_get_default();
@@ -261,7 +353,7 @@ int main()
   esp_wifi_set_ps(WIFI_PS_NONE);
   k_sleep(K_MSEC(200));
 
-  static ZenbeddedClient<RawCodec<zenbedded_state_t>, RawCodec<zenbedded_command_t>> client;
+  static ZenbeddedClient<RawCodec<zenbedded_state_t>, RawCodec<zenbedded_command_t> > client;
   int ret = client.init(100);
   if (ret != 0)
   {
@@ -279,8 +371,6 @@ int main()
   int32_t stepper_position = 0;
   double stepper_angle = 0;
   double stepper_angle_offset = 0;
-  double encoder_angle = M_PI;  // upside down position
-  double encoder_angle_offset = 0;
   double stepper_angular_velocity = 0;
 
   // Zero reference for the stepper: whatever position it is in at boot becomes 0,
@@ -298,24 +388,14 @@ int main()
   stepper_min_position = stepper_position - stepper_limit_microsteps;
   stepper_max_position = stepper_position + stepper_limit_microsteps;
 
-  // Zero reference for the encoder: whatever the pendulum's angle is at boot becomes 0.
-  // The pendulum must be hanging down (upside-down relative to the upright balance target)
-  // when the board powers on, so this zero corresponds to that resting/down position.
-  if (!get_encoder_angle_deg(&encoder_angle_offset))
-  {
-    LOG_ERR("Failed to read initial encoder angle; cannot calibrate the pendulum zero");
-    return -EIO;
-  }
-
   uint32_t last_command_count = client.accepted_command_count();
   uint32_t cycles_since_command = 0;
   uint32_t print_count = 0;
   double commanded_acceleration = 0.0;
   double prev_stepper_angle = stepper_angle;
-  double prev_encoder_angle = encoder_angle;
-  double pendulum_joint_velocity = 0.0;
   double loop_freq = 0.0;
   uint32_t last_state_time = k_uptime_get_32();
+  EncoderState encoder_state;
 
   uint32_t led_toggle_counter = 0;
   bool is_led_red = true;
@@ -329,27 +409,18 @@ int main()
       stepper_angle = microsteps_to_angle(stepper_position) - stepper_angle_offset;
     }
 
-    double raw_encoder_angle = 0;
-    if (get_encoder_angle_deg(&raw_encoder_angle))
-    {
-      double angle = fmod(raw_encoder_angle - encoder_angle_offset + M_PI, 2 * M_PI);
-      encoder_angle = wrap_angle(angle);
-    }
+    k_msgq_get(&encoder_state_msgq, &encoder_state, K_FOREVER);
 
     double dt = static_cast<double>(k_uptime_get_32() - last_state_time) / 1000.0;
     last_state_time = k_uptime_get_32();
-    double motor_joint_velocity = (stepper_angle - prev_stepper_angle) / dt;
-    double raw_pendulum_velocity = wrap_angle(encoder_angle - prev_encoder_angle) / dt;
-    pendulum_joint_velocity = kVelocityFilterAlpha * raw_pendulum_velocity +
-                              (1 - kVelocityFilterAlpha) * pendulum_joint_velocity;
+    double motor_joint_velocity = (dt > 0.0) ? (stepper_angle - prev_stepper_angle) / dt : 0.0;
     prev_stepper_angle = stepper_angle;
-    prev_encoder_angle = encoder_angle;
 
     zenbedded_state_t state_val{
       .motor_joint_position = stepper_angle,
       .motor_joint_velocity = motor_joint_velocity,
-      .pendulum_joint_position = encoder_angle,
-      .pendulum_joint_velocity = pendulum_joint_velocity};
+      .pendulum_joint_position = encoder_state.angle,
+      .pendulum_joint_velocity = encoder_state.velocity};
 
     if (++print_count == 100)
     {
@@ -357,7 +428,8 @@ int main()
       printk(
         "stepper_angle=%.4f rad, stepper_vel=%.4f rad/s, "
         "encoder_angle=%.4f rad, encoder_vel=%.4f rad/s\n, loop_freq=%.2f Hz",
-        stepper_angle, motor_joint_velocity, encoder_angle, pendulum_joint_velocity, loop_freq);
+        stepper_angle, motor_joint_velocity, encoder_state.angle, encoder_state.velocity,
+        loop_freq);
     }
 
     zenbedded_command_t cmd_val;
@@ -388,15 +460,8 @@ int main()
     // Integrate the (possibly stale-but-not-yet-timed-out) commanded acceleration into
     // velocity every control cycle, not just when a new command arrives.
     stepper_angular_velocity += commanded_acceleration * kControlPeriodSec;
-    stepper_angular_velocity = std::clamp(
-      stepper_angular_velocity, -kMaxAngularVelocityRadPerSec, kMaxAngularVelocityRadPerSec);
-
-    // If the pendulum falls outside +-20 degrees, stop moving.
-    if (fabs(encoder_angle) > (20.0 * M_PI / 180.0))
-    {
-      stepper_angular_velocity = 0.0;
-      commanded_acceleration = 0.0;
-    }
+    stepper_angular_velocity =
+      std::clamp(stepper_angular_velocity, -kMaxAngularVelocity, kMaxAngularVelocity);
 
     enforce_stepper_hard_stop(stepper_angle, &stepper_angular_velocity);
     set_stepper_angular_vel(stepper_angular_velocity);
