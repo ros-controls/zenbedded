@@ -212,7 +212,7 @@ struct EncoderState
 };
 
 K_SEM_DEFINE(g_pendulum_ready, 0, 1);
-K_MSGQ_DEFINE(encoder_state_msgq, sizeof(EncoderState), 5, 1);
+K_MSGQ_DEFINE(encoder_state_msgq, sizeof(EncoderState), 1, 1);
 
 void encoder_sample_thread_entry(void *, void *, void *)
 {
@@ -228,6 +228,7 @@ void encoder_sample_thread_entry(void *, void *, void *)
   bool signaled_ready = false;
   uint32_t prev_time_us = k_cyc_to_us_floor32(k_cycle_get_32());
   EncoderState encoder_state;
+  encoder_state.angle = M_PI;  // upside down
 
   while (true)
   {
@@ -236,7 +237,8 @@ void encoder_sample_thread_entry(void *, void *, void *)
     double raw_encoder_angle = 0.0;
     if (get_encoder_angle_deg(&raw_encoder_angle))
     {
-      double angle = wrap_angle(fmod(raw_encoder_angle - encoder_angle_offset + M_PI, 2 * M_PI));
+      double angle =
+        wrap_angle(fmod(raw_encoder_angle - encoder_angle_offset + 3 * M_PI, 2 * M_PI));
 
       uint32_t now_us = k_cyc_to_us_floor32(k_cycle_get_32());
       double dt = static_cast<double>(now_us - prev_time_us) / 1.0e6;
@@ -261,21 +263,19 @@ void encoder_sample_thread_entry(void *, void *, void *)
         encoder_state.angle = angle;
       }
 
-      k_msgq_put(&encoder_state_msgq, &encoder_state, K_NO_WAIT);
+      while (k_msgq_put(&encoder_state_msgq, &encoder_state, K_NO_WAIT) != 0)
+      {
+        EncoderState dummy;
+        k_msgq_get(&encoder_state_msgq, &dummy, K_NO_WAIT);
+      }
 
       prev_encoder_angle = angle;
       have_prev = true;
     }
 
     uint32_t elapsed_us = k_cyc_to_us_floor32(k_cycle_get_32()) - loop_start_us;
-    if (elapsed_us < kEncoderSamplePeriodUs)
-    {
-      k_sleep(K_USEC(kEncoderSamplePeriodUs - elapsed_us));
-    }
-    else
-    {
-      k_yield();
-    }
+    k_sleep(
+      K_USEC((elapsed_us < kEncoderSamplePeriodUs) ? kEncoderSamplePeriodUs - elapsed_us : 200));
   }
 }
 
@@ -398,7 +398,7 @@ int main()
   EncoderState encoder_state;
 
   uint32_t led_toggle_counter = 0;
-  bool is_led_red = true;
+  bool is_flash_on = true;
 
   while (true)
   {
@@ -466,12 +466,12 @@ int main()
     enforce_stepper_hard_stop(stepper_angle, &stepper_angular_velocity);
     set_stepper_angular_vel(stepper_angular_velocity);
 
-    // Flash Red and Green every 250ms
+    // Flashes Green every 250ms
     if (led_ready && ++led_toggle_counter >= 25)
     {
       led_toggle_counter = 0;
-      is_led_red = !is_led_red;
-      pixels[0] = is_led_red ? RGB(0x00, 0x00, 0x00) : RGB(0x00, 0xFF, 0x00);
+      is_flash_on = !is_flash_on;
+      pixels[0] = is_flash_on ? RGB(0x00, 0xFF, 0x00) : RGB(0x00, 0x00, 0x00);
       led_strip_update_rgb(led, pixels, STRIP_NUM_PIXELS);
     }
 
