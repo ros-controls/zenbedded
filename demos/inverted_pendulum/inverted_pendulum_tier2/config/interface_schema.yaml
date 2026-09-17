@@ -1,8 +1,10 @@
 state_interfaces:
-  stepper_motor:
-    position: double
-  magnetic_encoder:
-    position: double
+  motor_joint:
+    position: float64
+    velocity: float64
+  pendulum_joint:
+    position: float64
+    velocity: float64
 command_interfaces:
-  stepper_motor:
-    velocity: double
+  motor_joint:
+    acceleration: float64

@@ -138,19 +138,21 @@ config ZENBEDDED_TIER2_SCHEMA_PATH
 # ==============================================================================
 
 config NET_BUF_DATA_SIZE
+    default 512 if ZENBEDDED_TIER_1
+    default 256 if ZENBEDDED_TIER_2
     default 256
 
 config NET_BUF_RX_COUNT
-    default 16
+    default 32
 
 config NET_BUF_TX_COUNT
-    default 16
+    default 128
 
 config NET_PKT_RX_COUNT
-    default 16
+    default 32
 
 config NET_PKT_TX_COUNT
-    default 16
+    default 32
 
 config HEAP_MEM_POOL_SIZE
     default 65536
