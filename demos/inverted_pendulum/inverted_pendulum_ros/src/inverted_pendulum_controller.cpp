@@ -37,7 +37,9 @@ controller_interface::CallbackReturn InvertedPendulumController::on_init()
     auto_declare<double>("balance_angle", 0.0);
     auto_declare<double>("kp", 1.0);
     auto_declare<double>("kd", 0.1);
-    auto_declare<double>("max_acceleration", 5.0);
+    auto_declare<double>("k_motor_pos", 0.0);
+    auto_declare<double>("k_motor_vel", 0.0);
+    auto_declare<double>("max_acceleration", 100.0);
   }
   catch (const std::exception & e)
   {
@@ -79,6 +81,8 @@ controller_interface::CallbackReturn InvertedPendulumController::on_configure(
   balance_angle_ = get_node()->get_parameter("balance_angle").as_double();
   kp_ = get_node()->get_parameter("kp").as_double();
   kd_ = get_node()->get_parameter("kd").as_double();
+  k_motor_pos_ = get_node()->get_parameter("k_motor_pos").as_double();
+  k_motor_vel_ = get_node()->get_parameter("k_motor_vel").as_double();
   max_acceleration_ = get_node()->get_parameter("max_acceleration").as_double();
 
   RCLCPP_INFO(
@@ -109,14 +113,27 @@ controller_interface::return_type InvertedPendulumController::update(
   //   [1] motor_joint/velocity
   //   [2] pendulum_joint/position
   //   [3] pendulum_joint/velocity
+  const double motor_pos = state_interfaces_[0].get_optional().value_or(0.0);
+  const double motor_vel = state_interfaces_[1].get_optional().value_or(0.0);
   const double pendulum_pos = state_interfaces_[2].get_optional().value_or(0.0);
   const double pendulum_vel = state_interfaces_[3].get_optional().value_or(0.0);
 
-  // PD on pendulum angle, using hardware-provided velocity (no estimation needed)
-  const double error = balance_angle_ - pendulum_pos;
-  double u = kp_ * error - kd_ * pendulum_vel;
+  double angle_error = balance_angle_ - pendulum_pos;
 
-  u = std::clamp(u, -max_acceleration_, max_acceleration_);
+  // Convert 20 degrees to radians for the threshold
+  const double activation_threshold_rad = 20.0 * M_PI / 180.0;
+
+  double u = 0.0;
+
+  // Only apply control effort if the pendulum is within ±20 degrees of the target
+  if (std::abs(angle_error) <= activation_threshold_rad)
+  {
+    // Full-State Feedback Control
+    u = (kp_ * angle_error) - (kd_ * pendulum_vel) - (k_motor_pos_ * motor_pos) -
+        (k_motor_vel_ * motor_vel);
+
+    u = std::clamp(u, -max_acceleration_, max_acceleration_);
+  }
 
   if (!command_interfaces_[0].set_value(u))
   {
@@ -125,6 +142,12 @@ controller_interface::return_type InvertedPendulumController::update(
       "Failed to set acceleration command interface value!");
     return controller_interface::return_type::ERROR;
   }
+
+  // Log the state and calculated output at 500ms intervals
+  RCLCPP_INFO_THROTTLE(
+    get_node()->get_logger(), *get_node()->get_clock(), 500,
+    "State: [m_pos: %.3f, m_vel: %.3f, p_pos: %.3f, p_vel: %.3f] | Err: %.3f | Cmd (accel): %.3f",
+    motor_pos, motor_vel, pendulum_pos, pendulum_vel, angle_error, u);
 
   return controller_interface::return_type::OK;
 }
