@@ -3,9 +3,9 @@
          type="mock_pendulum_hardware::MockPendulumHardware"
          base_class_type="hardware_interface::SystemInterface">
     <description>
-      In-process mock hardware that simulates Furuta pendulum dynamics.
-      Accepts motor joint acceleration commands and computes coupled
-      2-DOF Lagrangian dynamics. Used for testing without real hardware.
+        Mock hardware for a rotary (Furuta) inverted pendulum: coupled 2-DOF
+        dynamics, stepper hard stops and speed cap, encoder quantisation and
+        noise, optional raylib visualisation and sim speed factor.
     </description>
   </class>
 </library>

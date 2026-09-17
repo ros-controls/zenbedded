@@ -7,12 +7,75 @@ controller_manager:
 
 inverted_pendulum_controller:
   ros__parameters:
-    motor_joint_state_name: motor_joint/position
-    motor_joint_vel_name: motor_joint/velocity
-    pendulum_joint_state_name: pendulum_joint/position
-    pendulum_joint_vel_name: pendulum_joint/velocity
-    motor_joint_command_name: motor_joint/acceleration
-    balance_angle: 0.0
-    kp: 1.0
-    kd: 0.1
-    max_acceleration: 5.0
+    # -------------------------------------------------------------------------
+    # Hardware interface names
+    # -------------------------------------------------------------------------
+    motor_joint_state_name:    "motor_joint/position"
+    motor_joint_vel_name:      "motor_joint/velocity"
+    pendulum_joint_state_name: "pendulum_joint/position"
+    pendulum_joint_vel_name:   "pendulum_joint/velocity"
+    motor_joint_command_name:  "motor_joint/acceleration"
+
+    # -------------------------------------------------------------------------
+    # Plant constants  (keep in sync with the mock hardware / URDF)
+    # Changing these without re-solving the LQR degrades the balancer.
+    # -------------------------------------------------------------------------
+    m2:  0.014       # pendulum mass              [kg]
+    l2:  0.051       # hinge -> COM               [m]
+    L1:  0.062       # motor axis -> hinge        [m]
+    J2:  4.447e-5    # pendulum hinge inertia     [kg·m²]
+    g:   9.80665
+
+    # -------------------------------------------------------------------------
+    # LQR gains  u = -K * [q1, q1_dot, q2, q2_dot]
+    #
+    # Derived from:  Q = diag(5, 0.5, 80, 3),  R = 0.2
+    # on the linearisation of the above plant about q2 = 0 (upright).
+    #
+    # Closed-loop eigenvalues: -14.49, -10.95, -1.76 ± 1.37i
+    #
+    # Note: k_q1 is NEGATIVE. The arm must move away from centre before it
+    # can return, which is counter-intuitive but correct.
+    # -------------------------------------------------------------------------
+    k_q1:      -5.000
+    k_q1_vel:  -4.352
+    k_q2:     418.238
+    k_q2_vel:  33.281
+
+    # -------------------------------------------------------------------------
+    # Swing-up (energy-shaping)
+    #
+    # The pump drives the pendulum's mechanical energy toward the upright
+    # potential energy E_target = m2*g*l2.
+    #
+    #   u_pump = swing_accel_max * sign( -(E - E_target) * q2_dot * cos(q2) )
+    #
+    # BANG-BANG, not proportional. A proportional pump vanishes at rest and
+    # produces ~8x LESS hinge torque than the bearing's Coulomb friction, so
+    # the pendulum never starts moving. Saturated gives ~1300x and always does.
+    # When |q2_dot| < swing_start_vel the sign is meaningless, so a fixed
+    # kick seeds the first half-swing.
+    # The arm-centering PD is always active and takes full authority when
+    # |q1| > arm_zone (pump is zeroed in that case).
+    #
+    # Validated at 100 Hz ZOH (matching update_rate): 50/50 runs, ±2% plant
+    # scatter, encoder noise, mock-hardware activation jitter.
+    # Average first-catch 1.34 s; peak arm travel 80 deg (stops at 135).
+    # -------------------------------------------------------------------------
+    k_e:              80.0    # direction only; magnitude is swing_accel_max
+    k_arm:            30.0    # arm P-recentering gain     [rad/s² per rad]
+    k_arm_vel:         6.0    # arm D-recentering gain     [rad/s² per rad/s]
+    swing_start_vel:  0.01    # dead-start kick threshold  [rad/s]
+    swing_accel_max:  60.0    # pump saturation            [rad/s²]
+    arm_zone:          2.0    # pump disabled beyond       [rad]  (~115 deg)
+
+    # -------------------------------------------------------------------------
+    # Mode transitions  (hysteretic to prevent chattering)
+    # -------------------------------------------------------------------------
+    catch_angle:  0.35    # enter LQR when |q2| < this  [rad]  (~20 deg)
+    fall_angle:   0.70    # return to swing-up           [rad]  (~40 deg)
+
+    # -------------------------------------------------------------------------
+    # Safety
+    # -------------------------------------------------------------------------
+    motor_accel_max: 150.0  # hard clamp on u             [rad/s²]

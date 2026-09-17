@@ -22,6 +22,7 @@
     <depend>pluginlib</depend>
     <depend>xacro</depend>
     <depend>launch_ros</depend>
+    <depend>raylib</depend>
 
     <export>
         <build_type>ament_cmake</build_type>
