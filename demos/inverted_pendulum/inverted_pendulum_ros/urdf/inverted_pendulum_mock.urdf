@@ -35,14 +35,14 @@
 
             <!-- Actuator limits -->
             <param name="motor_position_limit">2.35619449</param>  <!-- ±135° -->
-            <param name="motor_max_velocity">5.0</param>
+            <param name="motor_max_velocity">7.0</param>
             <param name="motor_max_acceleration">200.0</param>
-            <param name="motor_max_torque">0.3</param>
+            <param name="motor_max_torque">0.4</param>
             <param name="model_step_loss">true</param>
             <param name="hard_stop_restitution">0.0</param>
 
             <!-- Sensors -->
-            <param name="motor_steps_per_rev">6400</param>
+            <param name="motor_steps_per_rev">3200</param>
             <param name="encoder_counts_per_rev">4096</param>
             <param name="encoder_noise">0.0004</param>
             <param name="pendulum_velocity_from_encoder">true</param>

@@ -43,7 +43,6 @@ target_link_libraries(zenbedded_inverted_pendulum_rl
 )
 pluginlib_export_plugin_description_file(controller_interface inverted_pendulum_rl_controller.xml)
 
-add_library(mock_pendulum_hardware SHARED src/mock_pendulum_hardware.cpp)
 
 set(MOCK_PENDULUM_SOURCES src/mock_pendulum_hardware.cpp)
 if(VISUALIZATION)

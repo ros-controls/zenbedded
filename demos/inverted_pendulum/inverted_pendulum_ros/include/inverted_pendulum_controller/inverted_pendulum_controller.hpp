@@ -1,16 +1,5 @@
 // Copyright 2026 Open Source Robotics Foundation, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 #ifndef INVERTED_PENDULUM_CONTROLLER__INVERTED_PENDULUM_CONTROLLER_HPP_
 #define INVERTED_PENDULUM_CONTROLLER__INVERTED_PENDULUM_CONTROLLER_HPP_
@@ -18,15 +7,11 @@
 #include <string>
 
 #include "controller_interface/controller_interface.hpp"
-#include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 
 namespace inverted_pendulum_controller
 {
-/// Feedback controller for a Furuta (rotary) inverted pendulum.
-///
-/// Reads pendulum position and velocity from state interfaces, outputs a
-/// motor joint acceleration command via PD control on the pendulum angle.
+
 class InvertedPendulumController : public controller_interface::ControllerInterface
 {
 public:
@@ -47,19 +32,39 @@ public:
   controller_interface::return_type update(
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
-protected:
-  // Interface names (read in on_configure)
+private:
+  // Interface name strings
   std::string motor_joint_state_name_;
   std::string motor_joint_vel_name_;
   std::string pendulum_joint_state_name_;
   std::string pendulum_joint_vel_name_;
   std::string motor_joint_command_name_;
 
-  // Control parameters
-  double balance_angle_;
-  double kp_;
-  double kd_;
-  double max_acceleration_;
+  // Plant constants
+  double m2_{0.014}, l2_{0.051}, L1_{0.062}, J2_{4.447e-5}, g_{9.80665};
+  double E_target_{0.0};  // computed from m2, g, l2 in on_configure
+
+  // LQR gains  (u = -K * [q1, q1d, q2, q2d])
+  double k_q1_{-5.000};
+  double k_q1_vel_{-4.352};
+  double k_q2_{418.238};
+  double k_q2_vel_{33.281};
+
+  // Swing-up
+  double k_e_{80.0};
+  double k_arm_{30.0};
+  double k_arm_vel_{6.0};
+  double swing_accel_max_{60.0};
+  double arm_zone_{2.0};
+  double swing_start_vel_{0.01};
+
+  // Mode switching
+  double catch_angle_{0.35};
+  double fall_angle_{0.70};
+  double motor_accel_max_{150.0};
+
+  // Runtime state
+  bool balancing_{false};
 };
 
 }  // namespace inverted_pendulum_controller

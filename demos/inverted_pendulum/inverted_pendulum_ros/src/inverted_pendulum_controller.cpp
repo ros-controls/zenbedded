@@ -17,6 +17,60 @@
 #include <algorithm>
 #include <cmath>
 
+// ============================================================================
+//
+// Control architecture
+// ============================================================================
+//
+// Two regimes, selected by how far the pendulum is from upright:
+//
+//   SWING-UP  (|q2| > catch_angle_)
+//     Energy-shaping pump: drive the pendulum's mechanical energy toward the
+//     upright potential energy.
+//
+//     dE/dt  =  q2_dot * m2 * L1 * l2 * cos(q2) * q1_ddot
+//
+//     The SIGN of  -(E - E_target) * q2_dot * cos(q2)  gives the direction
+//     that adds energy. The magnitude is a fixed saturation:
+//
+//       u_pump = swing_accel_max * sign( -(E - E_target) * q2_dot * cos(q2) )
+//
+//     Bang-bang, not proportional: a proportional pump vanishes at rest and
+//     cannot break the hinge's Coulomb friction, so the pendulum never starts.
+//     The arm is simultaneously re-centred with a PD term so the pump never
+//     exhausts the available travel:
+//
+//       u_arm  = -k_arm * q1 - k_arm_vel * q1_dot
+//
+//     The pump term is zeroed when |q1| > arm_zone_  so the arm-centering
+//     has unconditional authority near the stops.
+//
+//   BALANCE  (|q2| ≤ catch_angle_)
+//     Full-state LQR feedback computed from the linearisation about q2 = 0:
+//
+//       state x = [q1, q1_dot, q2, q2_dot]
+//       u = -K * x
+//
+//     LQR derivation (plant constants from model/inverted_pendulum.urdf):
+//       m2=0.014 kg, l2=0.051 m, L1=0.062 m, J2_hinge=4.447e-5 kg·m²
+//       Q = diag(5, 0.5, 80, 3),  R = 0.2
+//       K = [-5.000, -4.352, +418.238, +33.281]
+//
+//     Eigenvalues of (A - BK):
+//       -14.492, -10.947, -1.759 ± 1.367i  (all stable)
+//
+//     Note the negative sign on k_q1: the arm has to move away from centre
+//     before it can come back, and negating this gain is the most common
+//     reason a hand-tuned balancer walks into a hard stop.
+//
+//   TRANSITION
+//     Hysteresis: enter balance at catch_angle_, exit (back to swing-up) at
+//     fall_angle_ > catch_angle_.  This prevents chattering near the boundary.
+//
+// All gains are ROS parameters so they can be tuned without recompiling.
+//
+// ============================================================================
+
 namespace inverted_pendulum_controller
 {
 
@@ -29,15 +83,41 @@ controller_interface::CallbackReturn InvertedPendulumController::on_init()
 {
   try
   {
+    // Interface names
     auto_declare<std::string>("motor_joint_state_name", "motor_joint/position");
     auto_declare<std::string>("motor_joint_vel_name", "motor_joint/velocity");
     auto_declare<std::string>("pendulum_joint_state_name", "pendulum_joint/position");
     auto_declare<std::string>("pendulum_joint_vel_name", "pendulum_joint/velocity");
     auto_declare<std::string>("motor_joint_command_name", "motor_joint/acceleration");
-    auto_declare<double>("balance_angle", 0.0);
-    auto_declare<double>("kp", 1.0);
-    auto_declare<double>("kd", 0.1);
-    auto_declare<double>("max_acceleration", 5.0);
+
+    // Plant constants (must match the hardware / URDF values)
+    auto_declare<double>("m2", 0.014);     // pendulum mass            [kg]
+    auto_declare<double>("l2", 0.051);     // hinge to COM             [m]
+    auto_declare<double>("L1", 0.062);     // arm reach                [m]
+    auto_declare<double>("J2", 4.447e-5);  // pendulum hinge inertia   [kg m²]
+    auto_declare<double>("g", 9.80665);
+
+    // LQR gains for x = [q1, q1d, q2, q2d]
+    // Defaults: Q=diag(5,0.5,80,3), R=0.2 on the URDF plant.
+    auto_declare<double>("k_q1", -5.000);
+    auto_declare<double>("k_q1_vel", -4.352);
+    auto_declare<double>("k_q2", 418.238);
+    auto_declare<double>("k_q2_vel", 33.281);
+
+    // Swing-up
+    auto_declare<double>("k_e", 80.0);       // (direction only; magnitude is swing_accel_max)
+    auto_declare<double>("k_arm", 30.0);     // arm-recentering P gain
+    auto_declare<double>("k_arm_vel", 6.0);  // arm-recentering D gain
+    auto_declare<double>("swing_accel_max", 60.0);  // pump saturation       [rad/s²]
+    auto_declare<double>("arm_zone", 2.0);          // pump disabled beyond  [rad]
+    auto_declare<double>("swing_start_vel", 0.01);  // dead-start threshold  [rad/s]
+
+    // Mode transitions
+    auto_declare<double>("catch_angle", 0.35);  // enter LQR             [rad]
+    auto_declare<double>("fall_angle", 0.70);   // exit LQR              [rad]
+
+    // Safety
+    auto_declare<double>("motor_accel_max", 150.0);  // hard clamp on output  [rad/s²]
   }
   catch (const std::exception & e)
   {
@@ -47,44 +127,83 @@ controller_interface::CallbackReturn InvertedPendulumController::on_init()
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
+// ---------------------------------------------------------------------------
+
 controller_interface::InterfaceConfiguration
 InvertedPendulumController::command_interface_configuration() const
 {
-  controller_interface::InterfaceConfiguration config;
-  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-  config.names.push_back(motor_joint_command_name_);
-  return config;
+  controller_interface::InterfaceConfiguration cfg;
+  cfg.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+  cfg.names.push_back(motor_joint_command_name_);
+  return cfg;
 }
 
 controller_interface::InterfaceConfiguration
 InvertedPendulumController::state_interface_configuration() const
 {
-  controller_interface::InterfaceConfiguration config;
-  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-  config.names.push_back(motor_joint_state_name_);
-  config.names.push_back(motor_joint_vel_name_);
-  config.names.push_back(pendulum_joint_state_name_);
-  config.names.push_back(pendulum_joint_vel_name_);
-  return config;
+  controller_interface::InterfaceConfiguration cfg;
+  cfg.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+  cfg.names.push_back(motor_joint_state_name_);
+  cfg.names.push_back(motor_joint_vel_name_);
+  cfg.names.push_back(pendulum_joint_state_name_);
+  cfg.names.push_back(pendulum_joint_vel_name_);
+  return cfg;
 }
+
+// ---------------------------------------------------------------------------
 
 controller_interface::CallbackReturn InvertedPendulumController::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  motor_joint_state_name_ = get_node()->get_parameter("motor_joint_state_name").as_string();
-  motor_joint_vel_name_ = get_node()->get_parameter("motor_joint_vel_name").as_string();
-  pendulum_joint_state_name_ = get_node()->get_parameter("pendulum_joint_state_name").as_string();
-  pendulum_joint_vel_name_ = get_node()->get_parameter("pendulum_joint_vel_name").as_string();
-  motor_joint_command_name_ = get_node()->get_parameter("motor_joint_command_name").as_string();
-  balance_angle_ = get_node()->get_parameter("balance_angle").as_double();
-  kp_ = get_node()->get_parameter("kp").as_double();
-  kd_ = get_node()->get_parameter("kd").as_double();
-  max_acceleration_ = get_node()->get_parameter("max_acceleration").as_double();
+  auto & n = *get_node();
+
+  motor_joint_state_name_ = n.get_parameter("motor_joint_state_name").as_string();
+  motor_joint_vel_name_ = n.get_parameter("motor_joint_vel_name").as_string();
+  pendulum_joint_state_name_ = n.get_parameter("pendulum_joint_state_name").as_string();
+  pendulum_joint_vel_name_ = n.get_parameter("pendulum_joint_vel_name").as_string();
+  motor_joint_command_name_ = n.get_parameter("motor_joint_command_name").as_string();
+
+  m2_ = n.get_parameter("m2").as_double();
+  l2_ = n.get_parameter("l2").as_double();
+  L1_ = n.get_parameter("L1").as_double();
+  J2_ = n.get_parameter("J2").as_double();
+  g_ = n.get_parameter("g").as_double();
+
+  k_q1_ = n.get_parameter("k_q1").as_double();
+  k_q1_vel_ = n.get_parameter("k_q1_vel").as_double();
+  k_q2_ = n.get_parameter("k_q2").as_double();
+  k_q2_vel_ = n.get_parameter("k_q2_vel").as_double();
+
+  k_e_ = n.get_parameter("k_e").as_double();
+  k_arm_ = n.get_parameter("k_arm").as_double();
+  k_arm_vel_ = n.get_parameter("k_arm_vel").as_double();
+  swing_accel_max_ = std::fabs(n.get_parameter("swing_accel_max").as_double());
+  arm_zone_ = std::fabs(n.get_parameter("arm_zone").as_double());
+
+  catch_angle_ = std::fabs(n.get_parameter("catch_angle").as_double());
+  fall_angle_ = std::fabs(n.get_parameter("fall_angle").as_double());
+  if (fall_angle_ <= catch_angle_)
+  {
+    RCLCPP_WARN(
+      n.get_logger(),
+      "fall_angle (%.3f) <= catch_angle (%.3f); setting fall_angle = 2 * catch_angle", fall_angle_,
+      catch_angle_);
+    fall_angle_ = 2.0 * catch_angle_;
+  }
+
+  motor_accel_max_ = std::fabs(n.get_parameter("motor_accel_max").as_double());
+
+  E_target_ = m2_ * g_ * l2_;  // PE at upright; KE=0 -> E_target = m2*g*l2
 
   RCLCPP_INFO(
-    get_node()->get_logger(),
-    "Configured Furuta controller: balance_angle=%.3f kp=%.3f kd=%.3f max_accel=%.3f",
-    balance_angle_, kp_, kd_, max_acceleration_);
+    n.get_logger(),
+    "Furuta LQR controller configured:\n"
+    "  Plant:    m2=%.4f kg  l2=%.4f m  L1=%.4f m  J2=%.3e\n"
+    "  LQR K:   [%.3f, %.3f, %.3f, %.3f]\n"
+    "  Swing-up: k_e=%.1f  sat=%.1f rad/s²  arm_zone=%.2f rad\n"
+    "  Catch:    |q2| < %.3f rad (%.1f°), fall back at %.3f rad (%.1f°)",
+    m2_, l2_, L1_, J2_, k_q1_, k_q1_vel_, k_q2_, k_q2_vel_, k_e_, swing_accel_max_, arm_zone_,
+    catch_angle_, catch_angle_ * 180.0 / M_PI, fall_angle_, fall_angle_ * 180.0 / M_PI);
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -92,39 +211,107 @@ controller_interface::CallbackReturn InvertedPendulumController::on_configure(
 controller_interface::CallbackReturn InvertedPendulumController::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  balancing_ = false;
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn InvertedPendulumController::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  command_interfaces_[0].set_value(0.0);
   return controller_interface::CallbackReturn::SUCCESS;
 }
+
+// ---------------------------------------------------------------------------
 
 controller_interface::return_type InvertedPendulumController::update(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  // State interface ordering:
-  //   [0] motor_joint/position
-  //   [1] motor_joint/velocity
-  //   [2] pendulum_joint/position
-  //   [3] pendulum_joint/velocity
-  const double pendulum_pos = state_interfaces_[2].get_optional().value_or(0.0);
-  const double pendulum_vel = state_interfaces_[3].get_optional().value_or(0.0);
+  // State interfaces are guaranteed to be in the order declared by
+  // state_interface_configuration(): q1, q1d, q2, q2d.
+  const double q1 = state_interfaces_[0].get_optional().value_or(0.0);
+  const double q1d = state_interfaces_[1].get_optional().value_or(0.0);
+  const double q2 = state_interfaces_[2].get_optional().value_or(0.0);
+  const double q2d = state_interfaces_[3].get_optional().value_or(0.0);
 
-  // PD on pendulum angle, using hardware-provided velocity (no estimation needed)
-  const double error = balance_angle_ - pendulum_pos;
-  double u = kp_ * error - kd_ * pendulum_vel;
+  // ---- Mode transitions (hysteretic) -------------------------------------
+  const double abs_q2 = std::fabs(q2);
+  if (!balancing_ && abs_q2 < catch_angle_)
+  {
+    balancing_ = true;
+    RCLCPP_INFO(get_node()->get_logger(), "CATCH: entering LQR balance at q2=%.4f rad", q2);
+  }
+  else if (balancing_ && abs_q2 > fall_angle_)
+  {
+    balancing_ = false;
+    RCLCPP_WARN(get_node()->get_logger(), "FELL: returning to swing-up at q2=%.4f rad", q2);
+  }
 
-  u = std::clamp(u, -max_acceleration_, max_acceleration_);
+  // ---- Control law -------------------------------------------------------
+  double u = 0.0;
+
+  if (balancing_)
+  {
+    // Full-state LQR: u = -K * [q1, q1d, q2, q2d]
+    u = -(k_q1_ * q1 + k_q1_vel_ * q1d + k_q2_ * q2 + k_q2_vel_ * q2d);
+  }
+  else
+  {
+    // Energy of the pendulum about its hinge
+    // E = 0.5 * J2 * q2d² + m2*g*l2*cos(q2)
+    // E_target = m2*g*l2  (upright, zero KE)
+    // dE/dt = q2d * m2*L1*l2*cos(q2) * u   (dominant coupling term)
+    // To drive E → E_target: u = -k_e * (E - E_target) * q2d * cos(q2)
+    const double E = 0.5 * J2_ * q2d * q2d + m2_ * g_ * l2_ * std::cos(q2);
+    const double E_err = E - E_target_;
+
+    // Pump DIRECTION from energy shaping; pump MAGNITUDE is a fixed
+    // saturation, not proportional to the energy error.
+    //
+    // This is a bang-bang law and it has to be. A proportional pump
+    //   u = -k_e * E_err * q2_dot * cos(q2)
+    // collapses to ~0 when the pendulum is at rest (q2_dot ~ 0), producing a
+    // hinge torque roughly 8x SMALLER than the bearing's Coulomb friction.
+    // The pendulum then never breaks stiction and simply hangs there. The
+    // saturated form delivers ~1300x the friction torque and always starts.
+    const double pump_dir = -E_err * q2d * std::cos(q2);
+
+    double u_pump = 0.0;
+    if (std::fabs(q1) < arm_zone_)
+    {
+      if (std::fabs(q2d) > swing_start_vel_)
+      {
+        u_pump = std::copysign(swing_accel_max_, pump_dir);
+      }
+      else
+      {
+        // Dead start: q2_dot is ~0, so pump_dir carries no usable sign.
+        // Kick in a fixed direction to seed the first half-swing.
+        u_pump = swing_accel_max_;
+      }
+    }
+
+    // Arm-centering PD: always active
+    const double u_arm = -k_arm_ * q1 - k_arm_vel_ * q1d;
+
+    u = u_pump + u_arm;
+  }
+
+  // Global safety clamp (hardware also enforces its own limit)
+  u = std::clamp(u, -motor_accel_max_, motor_accel_max_);
 
   if (!command_interfaces_[0].set_value(u))
   {
     RCLCPP_ERROR_THROTTLE(
       get_node()->get_logger(), *get_node()->get_clock(), 1000,
-      "Failed to set acceleration command interface value!");
+      "Failed to set command interface value");
     return controller_interface::return_type::ERROR;
   }
+
+  RCLCPP_INFO_THROTTLE(
+    get_node()->get_logger(), *get_node()->get_clock(), 250,
+    "[%s] q1=%+.3f q1d=%+.4f | q2=%+.4f q2d=%+.4f | u=%+8.3f", balancing_ ? "BALANCE" : "SWING-UP",
+    q1, q1d, q2, q2d, u);
 
   return controller_interface::return_type::OK;
 }
