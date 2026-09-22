@@ -21,9 +21,9 @@ if(VISUALIZATION)
 endif()
 
 
-add_library(zenbedded_inverted_pendulum SHARED src/inverted_pendulum_controller.cpp)
-target_include_directories(zenbedded_inverted_pendulum PRIVATE include)
-target_link_libraries(zenbedded_inverted_pendulum
+add_library(inverted_pendulum_controller SHARED src/inverted_pendulum_controller.cpp)
+target_include_directories(inverted_pendulum_controller PRIVATE include)
+target_link_libraries(inverted_pendulum_controller
         PUBLIC
         controller_interface::controller_interface
         pluginlib::pluginlib
@@ -32,9 +32,9 @@ target_link_libraries(zenbedded_inverted_pendulum
 )
 pluginlib_export_plugin_description_file(controller_interface inverted_pendulum_controller.xml)
 
-add_library(zenbedded_inverted_pendulum_rl SHARED src/inverted_pendulum_rl_controller.cpp)
-target_include_directories(zenbedded_inverted_pendulum_rl PRIVATE include)
-target_link_libraries(zenbedded_inverted_pendulum_rl
+add_library(inverted_pendulum_rl_controller SHARED src/inverted_pendulum_rl_controller.cpp)
+target_include_directories(inverted_pendulum_rl_controller PRIVATE include)
+target_link_libraries(inverted_pendulum_rl_controller
         PUBLIC
         controller_interface::controller_interface
         pluginlib::pluginlib
@@ -64,7 +64,7 @@ pluginlib_export_plugin_description_file(hardware_interface mock_pendulum_hardwa
 
 
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS zenbedded_inverted_pendulum zenbedded_inverted_pendulum_rl mock_pendulum_hardware
+install(TARGETS inverted_pendulum_controller inverted_pendulum_rl_controller mock_pendulum_hardware
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin

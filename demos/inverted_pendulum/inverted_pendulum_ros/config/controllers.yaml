@@ -1,9 +1,12 @@
 controller_manager:
   ros__parameters:
-    update_rate: 100
+    update_rate: 100  # Hz
 
     inverted_pendulum_controller:
       type: inverted_pendulum_controller/InvertedPendulumController
+
+    inverted_pendulum_rl_controller:
+      type: inverted_pendulum_rl_controller/InvertedPendulumRlController
 
 inverted_pendulum_controller:
   ros__parameters:
@@ -70,12 +73,73 @@ inverted_pendulum_controller:
     arm_zone:          2.0    # pump disabled beyond       [rad]  (~115 deg)
 
     # -------------------------------------------------------------------------
-    # Mode transitions  (hysteretic to prevent chattering)
+    # Mode transitions
+    #
+    # catch_angle is only a CANDIDATE window. The actual gate is on the LQR
+    # command that state would produce: at the raw catch_angle edge (0.35 rad)
+    # with zero velocity, k_q2 * catch_angle alone is ~98% of motor_accel_max
+    # -- no margin left for velocity damping, sensor noise, or the control
+    # loop's own actuation delay. Catching on position alone lets a noisy or
+    # fast pass through the window saturate the command, fail to arrest the
+    # swing, and fall straight back out: a catch/fall/re-swing oscillation
+    # that a low-noise, zero-delay simulation will not show you.
+    #
+    # catch_cmd_fraction caps |u_lqr| as a fraction of motor_accel_max before
+    # a catch is allowed; catch_ramp_steps blends the LQR command in linearly
+    # over that many cycles afterward instead of a step change, since a real
+    # stepper cannot track a step change in acceleration instantly.
     # -------------------------------------------------------------------------
-    catch_angle:  0.35    # enter LQR when |q2| < this  [rad]  (~20 deg)
-    fall_angle:   0.70    # return to swing-up           [rad]  (~40 deg)
+    catch_angle:        0.35   # candidate window              [rad]  (~20 deg)
+    fall_angle:          0.70  # exit LQR                       [rad]  (~40 deg)
+    catch_cmd_fraction:  0.55  # max |u_lqr| / motor_accel_max to allow a catch
+    catch_ramp_steps:     10.0   # cycles (~100 ms at 100 Hz) to blend in u_lqr
 
     # -------------------------------------------------------------------------
     # Safety
     # -------------------------------------------------------------------------
     motor_accel_max: 150.0  # hard clamp on u             [rad/s²]
+
+
+
+# ---------------------------------------------------------------------------
+# TRAINING (against mock_pendulum_hardware): leave enable_training true.
+# ---------------------------------------------------------------------------
+inverted_pendulum_rl_controller:
+  ros__parameters:
+    motor_joint_state_name: motor_joint/position
+    motor_joint_vel_name: motor_joint/velocity
+    pendulum_joint_state_name: pendulum_joint/position
+    pendulum_joint_vel_name: pendulum_joint/velocity
+    motor_joint_command_name: motor_joint/acceleration
+
+    max_acceleration: 100.0
+    enable_training: true
+
+    actor_lr: 0.0001
+    critic_lr: 0.001
+    gamma: 0.99
+    tau: 0.005
+    exploration_noise_std: 0.1
+    state_noise_std: 0.01
+    reward_threshold: 18.0
+    batch_size: 64
+    min_buffer_size_to_train: 256
+    replay_buffer_capacity: 100000
+    episode_length: 500
+    mirror_augmentation: true
+
+    actor_weights_path: ""  # empty -> random init
+    weights_save_dir: "./rl_weights"
+
+# ---------------------------------------------------------------------------
+# DEPLOYMENT (against ZenbeddedHardware on the real robot): copy this block
+# into a second yaml, point actor_weights_path at a checkpoint produced by
+# training above (e.g. furuta_rl_weights/actor_final.bin or actor_best.bin),
+# and set enable_training false so no critic/replay buffer is allocated and
+# only the actor's forward pass runs each cycle.
+# ---------------------------------------------------------------------------
+# nn_furuta_rl_controller:
+#   ros__parameters:
+#     enable_training: false
+#     actor_weights_path: "/path/to/furuta_rl_weights/actor_final.bin"
+#     max_acceleration: 50.0

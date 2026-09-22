@@ -113,8 +113,10 @@ controller_interface::CallbackReturn InvertedPendulumController::on_init()
     auto_declare<double>("swing_start_vel", 0.01);  // dead-start threshold  [rad/s]
 
     // Mode transitions
-    auto_declare<double>("catch_angle", 0.35);  // enter LQR             [rad]
-    auto_declare<double>("fall_angle", 0.70);   // exit LQR              [rad]
+    auto_declare<double>("catch_angle", 0.35);         // candidate window       [rad]
+    auto_declare<double>("fall_angle", 0.70);          // exit LQR               [rad]
+    auto_declare<double>("catch_cmd_fraction", 0.55);  // max |u_lqr|/accel_max to allow catch
+    auto_declare<double>("catch_ramp_steps", 10.0);    // cycles to blend in LQR command
 
     // Safety
     auto_declare<double>("motor_accel_max", 150.0);  // hard clamp on output  [rad/s²]
@@ -182,6 +184,9 @@ controller_interface::CallbackReturn InvertedPendulumController::on_configure(
 
   catch_angle_ = std::fabs(n.get_parameter("catch_angle").as_double());
   fall_angle_ = std::fabs(n.get_parameter("fall_angle").as_double());
+  catch_cmd_fraction_ = std::clamp(n.get_parameter("catch_cmd_fraction").as_double(), 0.05, 1.0);
+  catch_ramp_steps_ =
+    std::max(1, static_cast<int>(n.get_parameter("catch_ramp_steps").as_double()));
   if (fall_angle_ <= catch_angle_)
   {
     RCLCPP_WARN(
@@ -195,15 +200,29 @@ controller_interface::CallbackReturn InvertedPendulumController::on_configure(
 
   E_target_ = m2_ * g_ * l2_;  // PE at upright; KE=0 -> E_target = m2*g*l2
 
+  const double edge_cmd = std::fabs(k_q2_) * catch_angle_;
+  if (edge_cmd > catch_cmd_fraction_ * motor_accel_max_)
+  {
+    RCLCPP_WARN(
+      n.get_logger(),
+      "catch_angle (%.3f rad) alone demands %.1f rad/s^2 from k_q2 -- already %.0f%% of "
+      "motor_accel_max with zero velocity margin. The command gate (catch_cmd_fraction=%.2f) "
+      "will reject most catches at this window edge; consider a smaller catch_angle.",
+      catch_angle_, edge_cmd, 100.0 * edge_cmd / motor_accel_max_, catch_cmd_fraction_);
+  }
+
   RCLCPP_INFO(
     n.get_logger(),
     "Furuta LQR controller configured:\n"
     "  Plant:    m2=%.4f kg  l2=%.4f m  L1=%.4f m  J2=%.3e\n"
     "  LQR K:   [%.3f, %.3f, %.3f, %.3f]\n"
-    "  Swing-up: k_e=%.1f  sat=%.1f rad/s²  arm_zone=%.2f rad\n"
-    "  Catch:    |q2| < %.3f rad (%.1f°), fall back at %.3f rad (%.1f°)",
-    m2_, l2_, L1_, J2_, k_q1_, k_q1_vel_, k_q2_, k_q2_vel_, k_e_, swing_accel_max_, arm_zone_,
-    catch_angle_, catch_angle_ * 180.0 / M_PI, fall_angle_, fall_angle_ * 180.0 / M_PI);
+    "  Swing-up: sat=%.1f rad/s²  arm_zone=%.2f rad\n"
+    "  Catch:    |q2| < %.3f rad (%.1f°), command < %.0f%% of accel_max, fall back at %.3f rad "
+    "(%.1f°)\n"
+    "  Ramp:     %d cycles to blend in LQR command after catch",
+    m2_, l2_, L1_, J2_, k_q1_, k_q1_vel_, k_q2_, k_q2_vel_, swing_accel_max_, arm_zone_,
+    catch_angle_, catch_angle_ * 180.0 / M_PI, 100.0 * catch_cmd_fraction_, fall_angle_,
+    fall_angle_ * 180.0 / M_PI, catch_ramp_steps_);
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -212,6 +231,7 @@ controller_interface::CallbackReturn InvertedPendulumController::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   balancing_ = false;
+  catch_ramp_remaining_ = 0;
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -234,12 +254,34 @@ controller_interface::return_type InvertedPendulumController::update(
   const double q2 = state_interfaces_[2].get_optional().value_or(0.0);
   const double q2d = state_interfaces_[3].get_optional().value_or(0.0);
 
-  // ---- Mode transitions (hysteretic) -------------------------------------
+  // ---- Mode transitions ---------------------------------------------------
+  //
+  // Catching on POSITION ALONE is not safe. At the edge of a 0.35 rad catch
+  // window, k_q2 * catch_angle alone already demands ~146 rad/s^2 out of a
+  // 150 rad/s^2 ceiling -- 98% of authority spent before velocity damping or
+  // arm recentering get a say. Any residual swing velocity, sensor noise, or
+  // actuation delay (a real serial round-trip that this control law has no
+  // way to see) pushes the command over the clamp. A clipped LQR command
+  // cannot arrest the swing, so it "catches", instantly saturates, and gets
+  // thrown back out -- which is exactly a catch/fall/re-swing oscillation
+  // that never appears in a low-noise, zero-delay simulation.
+  //
+  // Fix: gate the catch on the command the LQR would ACTUALLY issue right
+  // now, not on position alone. This is a joint condition on position and
+  // velocity together (whichever combination is currently dangerous), and it
+  // adapts automatically to noise levels a fixed velocity threshold would
+  // have to be re-tuned for by hand.
   const double abs_q2 = std::fabs(q2);
-  if (!balancing_ && abs_q2 < catch_angle_)
+  const double u_lqr_candidate = -(k_q1_ * q1 + k_q1_vel_ * q1d + k_q2_ * q2 + k_q2_vel_ * q2d);
+  const bool command_is_safe = std::fabs(u_lqr_candidate) < catch_cmd_fraction_ * motor_accel_max_;
+
+  if (!balancing_ && abs_q2 < catch_angle_ && command_is_safe)
   {
     balancing_ = true;
-    RCLCPP_INFO(get_node()->get_logger(), "CATCH: entering LQR balance at q2=%.4f rad", q2);
+    catch_ramp_remaining_ = catch_ramp_steps_;
+    RCLCPP_INFO(
+      get_node()->get_logger(), "CATCH: entering LQR balance at q2=%.4f rad, q2d=%.4f rad/s", q2,
+      q2d);
   }
   else if (balancing_ && abs_q2 > fall_angle_)
   {
@@ -254,6 +296,19 @@ controller_interface::return_type InvertedPendulumController::update(
   {
     // Full-state LQR: u = -K * [q1, q1d, q2, q2d]
     u = -(k_q1_ * q1 + k_q1_vel_ * q1d + k_q2_ * q2 + k_q2_vel_ * q2d);
+
+    // Soft-engage: blend in linearly over catch_ramp_steps_ cycles instead of
+    // slamming from the swing-up command to the full LQR command in one
+    // cycle. A real stepper does not track a step change in acceleration
+    // instantly; ramping keeps the actuator inside its achievable response
+    // during exactly the moment precision matters most.
+    if (catch_ramp_remaining_ > 0)
+    {
+      const double frac =
+        1.0 - static_cast<double>(catch_ramp_remaining_) / static_cast<double>(catch_ramp_steps_);
+      u *= frac;
+      --catch_ramp_remaining_;
+    }
   }
   else
   {

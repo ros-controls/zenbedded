@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#ifndef INVERTED_PENDULUM_RL_CONTROLLER__INVERTED_PENDULUM_RL_CONTROLLER_HPP_
+#define INVERTED_PENDULUM_RL_CONTROLLER__INVERTED_PENDULUM_RL_CONTROLLER_HPP_
 
 #include <array>
 #include <atomic>
@@ -134,3 +135,5 @@ private:
 };
 
 }  // namespace inverted_pendulum_rl_controller
+
+#endif  // INVERTED_PENDULUM_RL_CONTROLLER__INVERTED_PENDULUM_RL_CONTROLLER_HPP_

@@ -63,6 +63,15 @@ private:
   double fall_angle_{0.70};
   double motor_accel_max_{150.0};
 
+  // Catch is gated on the LQR command it would ACTUALLY issue, not on
+  // position alone -- see the comment in update(). catch_cmd_fraction_ caps
+  // that command as a fraction of motor_accel_max_; catch_ramp_steps_ blends
+  // the LQR command in linearly over that many cycles after a catch so the
+  // transition is not a step change.
+  double catch_cmd_fraction_{0.55};
+  int catch_ramp_steps_{10};
+  int catch_ramp_remaining_{0};
+
   // Runtime state
   bool balancing_{false};
 };
