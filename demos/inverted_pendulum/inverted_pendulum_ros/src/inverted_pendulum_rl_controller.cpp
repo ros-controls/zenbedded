@@ -15,6 +15,7 @@
 #include "inverted_pendulum_rl_controller/inverted_pendulum_rl_controller.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <random>
@@ -23,8 +24,17 @@ namespace inverted_pendulum_rl_controller
 {
 
 InvertedPendulumRlController::InvertedPendulumRlController()
-: controller_interface::ControllerInterface(), rng_(std::random_device{}())
+: controller_interface::ControllerInterface(),
+  rng_(std::random_device{}()),
+  rng_train_(std::random_device{}())
 {
+}
+
+InvertedPendulumRlController::~InvertedPendulumRlController()
+{
+  // Defensive: make sure the background thread is never left running past
+  // the controller object's lifetime (e.g. if on_deactivate was skipped).
+  stop_training_thread();
 }
 
 controller_interface::CallbackReturn InvertedPendulumRlController::on_init()
@@ -51,12 +61,25 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_init()
     auto_declare<int>("episode_length", 500);
     auto_declare<bool>("mirror_augmentation", true);
 
+    // -- settle-to-rest between episodes --
+    auto_declare<double>("settle_velocity_threshold", 0.05);
+    auto_declare<int>("settle_hold_steps", 20);
+    auto_declare<int>("settle_timeout_steps", 1000);
+
+    // -- mid-episode disturbance injection (training only) --
+    auto_declare<bool>("enable_perturbations", true);
+    auto_declare<double>("perturbation_probability", 0.003);
+    auto_declare<double>("perturbation_magnitude", 0.6);
+    auto_declare<int>("perturbation_duration_steps", 4);
+    auto_declare<int>("min_stable_steps_before_perturbation", 150);
+
     // Master switch: true (default) allocates critic/replay-buffer/optimizer
-    // state and trains online, matching the simulation workflow. Set false
-    // for real-hardware deployment so only the actor's forward pass runs.
-    // Can also be flipped false at runtime via `ros2 param set` to freeze
-    // learning without restarting the controller (it cannot be flipped back
-    // to true at runtime unless it was true at configure time).
+    // state and trains continuously on a background thread, matching the
+    // simulation workflow. Set false for real-hardware deployment so only
+    // the actor's forward pass runs. Can also be flipped false at runtime
+    // via `ros2 param set` to freeze learning without restarting the
+    // controller (it cannot be flipped back to true at runtime unless it
+    // was true at configure time).
     auto_declare<bool>("enable_training", true);
 
     // If non-empty, loaded into the actor at on_configure - this is how a
@@ -101,6 +124,11 @@ InvertedPendulumRlController::state_interface_configuration() const
 controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  // Defensive: if we're being reconfigured without a clean deactivate in
+  // between, make sure no background thread is still touching the networks
+  // we're about to reallocate below.
+  stop_training_thread();
+
   auto node = get_node();
 
   motor_joint_state_name_ = node->get_parameter("motor_joint_state_name").as_string();
@@ -127,6 +155,18 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
   actor_weights_path_load_ = node->get_parameter("actor_weights_path").as_string();
   weights_save_dir_ = node->get_parameter("weights_save_dir").as_string();
 
+  settle_velocity_threshold_ = node->get_parameter("settle_velocity_threshold").as_double();
+  settle_hold_steps_ = static_cast<int>(node->get_parameter("settle_hold_steps").as_int());
+  settle_timeout_steps_ = static_cast<int>(node->get_parameter("settle_timeout_steps").as_int());
+
+  enable_perturbations_ = node->get_parameter("enable_perturbations").as_bool();
+  perturbation_probability_ = node->get_parameter("perturbation_probability").as_double();
+  perturbation_magnitude_ = node->get_parameter("perturbation_magnitude").as_double();
+  perturbation_duration_steps_ =
+    static_cast<int>(node->get_parameter("perturbation_duration_steps").as_int());
+  min_stable_steps_before_perturbation_ =
+    static_cast<int>(node->get_parameter("min_stable_steps_before_perturbation").as_int());
+
   const bool enable_training_initial = node->get_parameter("enable_training").as_bool();
   enable_training_.store(enable_training_initial);
 
@@ -149,8 +189,14 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
 
   if (enable_training_initial)
   {
+    // actor_learn_ is the background thread's working copy; it starts as an
+    // exact copy of the (possibly checkpoint-loaded) inference actor so
+    // training resumes from the same point that was just loaded.
+    actor_learn_ = std::make_unique<tiny_nn::ActorNet>(rng_);
+    actor_learn_->copy_from(*actor_);
+
     actor_target_ = std::make_unique<tiny_nn::ActorNet>(rng_);
-    actor_target_->copy_from(*actor_);
+    actor_target_->copy_from(*actor_learn_);
 
     critic_ = std::make_unique<tiny_nn::CriticNet>(rng_);
     critic_target_ = std::make_unique<tiny_nn::CriticNet>(rng_);
@@ -166,6 +212,7 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
   }
   else
   {
+    actor_learn_.reset();
     actor_target_.reset();
     critic_.reset();
     critic_target_.reset();
@@ -213,8 +260,7 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::CallbackReturn InvertedPendulumRlController::on_activate(
-  const rclcpp_lifecycle::State & /*previous_state*/)
+void InvertedPendulumRlController::reset_episode_state()
 {
   state_history_.clear();
   const std::array<float, kFeaturesPerStep> zero_step = {0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -226,11 +272,47 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_activate(
   has_last_state_ = false;
   last_flat_state_.clear();
   prev_action_ = 0.0f;
+  prev_prev_action_ = 0.0f;
 
   current_episode_reward_ = 0.0;
   episode_step_count_ = 0;
+
+  stable_step_count_ = 0;
+  perturbation_steps_remaining_ = 0;
+  current_perturbation_accel_ = 0.0f;
+
+  settle_stable_count_ = 0;
+  settle_step_count_ = 0;
+}
+
+void InvertedPendulumRlController::start_training_thread()
+{
+  if (!training_infra_allocated_ || training_thread_.joinable())
+  {
+    return;
+  }
+  training_thread_should_run_.store(true);
+  training_thread_ = std::thread(&InvertedPendulumRlController::training_thread_main, this);
+}
+
+void InvertedPendulumRlController::stop_training_thread()
+{
+  training_thread_should_run_.store(false);
+  if (training_thread_.joinable())
+  {
+    training_thread_.join();
+  }
+}
+
+controller_interface::CallbackReturn InvertedPendulumRlController::on_activate(
+  const rclcpp_lifecycle::State & /*previous_state*/)
+{
+  reset_episode_state();
   episode_rolling_rewards_.clear();
   best_rolling_avg_ = -std::numeric_limits<double>::infinity();
+  episode_phase_ = EpisodePhase::kRunning;
+
+  start_training_thread();
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -238,6 +320,7 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_activate(
 controller_interface::CallbackReturn InvertedPendulumRlController::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  stop_training_thread();
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -254,16 +337,40 @@ float InvertedPendulumRlController::wrap_angle(float angle)
   return angle;
 }
 
-float InvertedPendulumRlController::compute_reward(
-  float theta, float theta_dot, float alpha, float alpha_dot, float action)
+bool InvertedPendulumRlController::is_balanced(float theta, float theta_dot, float alpha)
 {
+  // "Balanced" for the purposes of the alive bonus AND disturbance gating:
+  // upright (15 deg) *and* centered (roughly 20 deg of arm travel), not just
+  // upright - this is what stops the policy from happily drifting the arm
+  // off-center as long as the pendulum itself stays vertical.
+  constexpr float kUprightRad = 0.2618f;   // 15 deg
+  constexpr float kCenteredRad = 0.3491f;  // 20 deg
+  constexpr float kUprightRateMax = 2.0f;  // rad/s
+  return std::abs(theta) <= kUprightRad && std::abs(theta_dot) <= kUprightRateMax &&
+         std::abs(alpha) <= kCenteredRad;
+}
+
+float InvertedPendulumRlController::compute_reward(
+  float theta, float theta_dot, float alpha, float alpha_dot, float action, float prev_action)
+{
+  const float action_delta = action - prev_action;
+
+  // Quadratic cost on: upright angle, angular rates, arm (centering) position,
+  // actuation effort, and actuation smoothness (a jerky-but-zero-mean action
+  // sequence "costs" the same as a smooth one under a pure |action| penalty,
+  // so the smoothness term is what actually buys minimum-effort behavior).
   float r =
-    -(theta * theta + 0.001f * theta_dot * theta_dot + 0.5f * alpha * alpha +
-      0.005f * alpha_dot * alpha_dot + 0.05f * action * action);
+    -(theta * theta + 0.02f * theta_dot * theta_dot +
+      0.8f * alpha * alpha +  // raised from 0.5: stronger centering pressure
+      0.01f * alpha_dot * alpha_dot + 0.05f * action * action +  // effort
+      0.03f * action_delta * action_delta                        // smoothness / minimum-effort
+    );
   r += 15.0f;  // Alive offset.
 
-  // Upright alive bonus (15 deg = 0.2618 rad).
-  if (std::abs(theta) <= 0.2618f && std::abs(theta_dot) <= 2.0f)
+  // Upright-AND-centered alive bonus (previously only checked upright, which
+  // let the policy leave the arm off-center indefinitely with no penalty
+  // beyond the small quadratic shaping term).
+  if (is_balanced(theta, theta_dot, alpha))
   {
     r += 5.0f;
   }
@@ -305,68 +412,112 @@ tiny_nn::Transition InvertedPendulumRlController::mirror_transition(const tiny_n
   return m;
 }
 
-void InvertedPendulumRlController::train_step()
+// Runs entirely on a dedicated background thread - NEVER on the RT control
+// thread. This is where all of the heap-allocating batched forward/backward
+// passes live. It only ever touches actor_learn_/actor_target_/critic_/
+// critic_target_ (background-thread-only state) and replay_buffer_ (under
+// replay_mutex_, brief critical sections only). The one place it talks to
+// the RT thread is publishing a refreshed copy into actor_ under
+// actor_infer_mutex_ so update() picks up newly-trained weights.
+void InvertedPendulumRlController::training_thread_main()
 {
-  if (!training_infra_allocated_ || !replay_buffer_)
+  while (training_thread_should_run_.load())
   {
-    return;
+    if (!training_infra_allocated_)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      continue;
+    }
+
+    // Service any pending checkpoint save even if training itself is
+    // currently paused (e.g. right after crossing reward_threshold_,
+    // enable_training_ is already false but the "final" checkpoint still
+    // needs to be written). Disk I/O happens here, never on the RT thread.
+    const CheckpointRequest req = checkpoint_request_.exchange(CheckpointRequest::kNone);
+    if (req != CheckpointRequest::kNone)
+    {
+      save_actor_checkpoint_net(*actor_learn_, req == CheckpointRequest::kFinal ? "final" : "best");
+    }
+
+    if (!enable_training_.load())
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      continue;
+    }
+
+    size_t buffer_size = 0;
+    {
+      std::lock_guard<std::mutex> lock(replay_mutex_);
+      buffer_size = replay_buffer_->size();
+    }
+    if (buffer_size < static_cast<size_t>(min_buffer_size_to_train_))
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      continue;
+    }
+
+    const size_t batch_size = static_cast<size_t>(batch_size_);
+    std::vector<std::vector<float>> states, next_states;
+    std::vector<float> actions, rewards;
+    {
+      std::lock_guard<std::mutex> lock(replay_mutex_);
+      replay_buffer_->sample(batch_size, rng_train_, states, actions, rewards, next_states);
+    }
+
+    // --- Critic update: minimize MSE(Q(s,a), r + gamma * Q_target(s', pi_target(s'))) ---
+    const tiny_nn::Vec next_actions = tiny_nn::col0(actor_target_->forward_batch(next_states));
+    const tiny_nn::Mat target_q = critic_target_->forward_batch(next_states, next_actions);
+
+    tiny_nn::Vec target_y(batch_size);
+    for (size_t i = 0; i < batch_size; ++i)
+    {
+      target_y[i] = rewards[i] + static_cast<float>(gamma_) * target_q[i][0];
+    }
+
+    const tiny_nn::Mat current_q = critic_->forward_batch(states, actions);
+    tiny_nn::Mat dQ(batch_size, tiny_nn::Vec(1, 0.0f));
+    for (size_t i = 0; i < batch_size; ++i)
+    {
+      dQ[i][0] = 2.0f * (current_q[i][0] - target_y[i]) / static_cast<float>(batch_size);
+    }
+    critic_->backward_and_step(dQ, static_cast<float>(critic_lr_));
+
+    // --- Actor update: maximize Q(s, pi(s)), i.e. minimize -mean(Q(s, pi(s))) ---
+    // Critic weights must NOT change here - only used to route a gradient
+    // back into the actor (see CriticNet::backward_for_actor_only).
+    const tiny_nn::Mat actor_actions_mat = actor_learn_->forward_batch(states);
+    const tiny_nn::Vec actor_actions = tiny_nn::col0(actor_actions_mat);
+    critic_->forward_batch(states, actor_actions);  // refresh critic caches, updated weights
+
+    const tiny_nn::Mat dQ_actor(
+      batch_size, tiny_nn::Vec(1, -1.0f / static_cast<float>(batch_size)));
+    const tiny_nn::Vec dAction_flat = critic_->backward_for_actor_only(dQ_actor);
+
+    tiny_nn::Mat dAction(batch_size, tiny_nn::Vec(1, 0.0f));
+    for (size_t i = 0; i < batch_size; ++i)
+    {
+      dAction[i][0] = dAction_flat[i];
+    }
+    actor_learn_->backward_and_step(dAction, static_cast<float>(actor_lr_));
+
+    // --- Soft-update target networks ---
+    actor_target_->soft_update_from(*actor_learn_, static_cast<float>(tau_));
+    critic_target_->soft_update_from(*critic_, static_cast<float>(tau_));
+
+    // --- Publish the freshly-trained actor to the RT thread's inference copy ---
+    // copy_from() just does an element-wise copy into already-correctly-sized
+    // buffers (no allocation), so this critical section is bounded and short
+    // even though it's shared with the RT thread's forward() call.
+    {
+      std::lock_guard<std::mutex> lock(actor_infer_mutex_);
+      actor_->copy_from(*actor_learn_);
+    }
   }
-  if (replay_buffer_->size() < static_cast<size_t>(min_buffer_size_to_train_))
-  {
-    return;
-  }
-
-  const size_t batch_size = static_cast<size_t>(batch_size_);
-  std::vector<std::vector<float>> states, next_states;
-  std::vector<float> actions, rewards;
-  replay_buffer_->sample(batch_size, rng_, states, actions, rewards, next_states);
-
-  // --- Critic update: minimize MSE(Q(s,a), r + gamma * Q_target(s', pi_target(s'))) ---
-  const tiny_nn::Vec next_actions = tiny_nn::col0(actor_target_->forward_batch(next_states));
-  const tiny_nn::Mat target_q = critic_target_->forward_batch(next_states, next_actions);
-
-  tiny_nn::Vec target_y(batch_size);
-  for (size_t i = 0; i < batch_size; ++i)
-  {
-    target_y[i] = rewards[i] + static_cast<float>(gamma_) * target_q[i][0];
-  }
-
-  const tiny_nn::Mat current_q = critic_->forward_batch(states, actions);
-  tiny_nn::Mat dQ(batch_size, tiny_nn::Vec(1, 0.0f));
-  for (size_t i = 0; i < batch_size; ++i)
-  {
-    dQ[i][0] = 2.0f * (current_q[i][0] - target_y[i]) / static_cast<float>(batch_size);
-  }
-  critic_->backward_and_step(dQ, static_cast<float>(critic_lr_));
-
-  // --- Actor update: maximize Q(s, pi(s)), i.e. minimize -mean(Q(s, pi(s))) ---
-  // Critic weights must NOT change here - only used to route a gradient back
-  // into the actor (see CriticNet::backward_for_actor_only).
-  const tiny_nn::Mat actor_actions_mat = actor_->forward_batch(states);
-  const tiny_nn::Vec actor_actions = tiny_nn::col0(actor_actions_mat);
-  critic_->forward_batch(states, actor_actions);  // refresh critic caches, updated weights
-
-  const tiny_nn::Mat dQ_actor(batch_size, tiny_nn::Vec(1, -1.0f / static_cast<float>(batch_size)));
-  const tiny_nn::Vec dAction_flat = critic_->backward_for_actor_only(dQ_actor);
-
-  tiny_nn::Mat dAction(batch_size, tiny_nn::Vec(1, 0.0f));
-  for (size_t i = 0; i < batch_size; ++i)
-  {
-    dAction[i][0] = dAction_flat[i];
-  }
-  actor_->backward_and_step(dAction, static_cast<float>(actor_lr_));
-
-  // --- Soft-update target networks ---
-  actor_target_->soft_update_from(*actor_, static_cast<float>(tau_));
-  critic_target_->soft_update_from(*critic_, static_cast<float>(tau_));
 }
 
-bool InvertedPendulumRlController::save_actor_checkpoint(const std::string & suffix) const
+bool InvertedPendulumRlController::save_actor_checkpoint_net(
+  const tiny_nn::ActorNet & net, const std::string & suffix) const
 {
-  if (!actor_)
-  {
-    return false;
-  }
   try
   {
     std::filesystem::create_directories(weights_save_dir_);
@@ -380,7 +531,7 @@ bool InvertedPendulumRlController::save_actor_checkpoint(const std::string & suf
   }
 
   const std::string path = weights_save_dir_ + "/actor_" + suffix + ".bin";
-  const bool ok = actor_->save(path);
+  const bool ok = net.save(path);
   if (ok)
   {
     RCLCPP_INFO(get_node()->get_logger(), "Saved actor checkpoint to '%s'", path.c_str());
@@ -410,6 +561,43 @@ controller_interface::return_type InvertedPendulumRlController::update(
   float alpha = static_cast<float>(motor_pos);
   float alpha_dot = static_cast<float>(motor_vel);
 
+  // --- Settling phase: wait for the system to actually stop moving before
+  // the next episode is allowed to start. No policy/exploration/training
+  // happens here - just a zero command and a velocity check. ---
+  if (episode_phase_ == EpisodePhase::kSettling)
+  {
+    ++settle_step_count_;
+
+    const bool at_rest = std::abs(theta_dot) <= static_cast<float>(settle_velocity_threshold_) &&
+                         std::abs(alpha_dot) <= static_cast<float>(settle_velocity_threshold_);
+    settle_stable_count_ = at_rest ? settle_stable_count_ + 1 : 0;
+
+    if (!command_interfaces_[0].set_value(0.0))
+    {
+      RCLCPP_ERROR_THROTTLE(
+        get_node()->get_logger(), *get_node()->get_clock(), 1000,
+        "Failed to set acceleration command interface value while settling!");
+      return controller_interface::return_type::ERROR;
+    }
+
+    const bool settled = settle_stable_count_ >= settle_hold_steps_;
+    const bool timed_out = settle_step_count_ >= settle_timeout_steps_;
+    if (settled || timed_out)
+    {
+      if (timed_out && !settled)
+      {
+        RCLCPP_WARN(
+          get_node()->get_logger(),
+          "Settle timeout (%d steps) reached before reaching rest (|vel| <= %.3f); "
+          "starting next episode anyway.",
+          settle_timeout_steps_, settle_velocity_threshold_);
+      }
+      reset_episode_state();
+      episode_phase_ = EpisodePhase::kRunning;
+    }
+    return controller_interface::return_type::OK;
+  }
+
   // Domain-randomization noise, training only (never perturbs real sensor
   // readings used for actual balancing/deployment).
   if (training)
@@ -428,7 +616,8 @@ controller_interface::return_type InvertedPendulumRlController::update(
     state_history_.pop_front();
   }
 
-  const float reward = compute_reward(theta, theta_dot, alpha, alpha_dot, prev_action_);
+  const float reward =
+    compute_reward(theta, theta_dot, alpha, alpha_dot, prev_action_, prev_prev_action_);
   current_episode_reward_ += reward;
   ++episode_step_count_;
 
@@ -437,6 +626,7 @@ controller_interface::return_type InvertedPendulumRlController::update(
   if (has_last_state_ && training && replay_buffer_)
   {
     tiny_nn::Transition transition{last_flat_state_, prev_action_, reward, flat_state};
+    std::lock_guard<std::mutex> lock(replay_mutex_);
     replay_buffer_->push(transition);
     if (mirror_augmentation_)
     {
@@ -446,20 +636,67 @@ controller_interface::return_type InvertedPendulumRlController::update(
   last_flat_state_ = flat_state;
   has_last_state_ = true;
 
-  // Action selection - this single forward() call is the only thing that
-  // runs on real hardware once training is disabled.
-  float action = actor_->forward(flat_state);
+  // Action selection - this single forward() call (and the brief lock around
+  // it) is the only thing that runs on real hardware once training is
+  // disabled. No training ever happens on this thread.
+  float action;
+  {
+    std::lock_guard<std::mutex> lock(actor_infer_mutex_);
+    action = actor_->forward(flat_state);
+  }
 
   if (training)
   {
     std::normal_distribution<float> explore_noise(0.0f, static_cast<float>(exploration_noise_std_));
     action = std::clamp(action + explore_noise(rng_), -1.0f, 1.0f);
-    train_step();
   }
 
+  prev_prev_action_ = prev_action_;
   prev_action_ = action;
 
-  if (!command_interfaces_[0].set_value(static_cast<double>(action) * max_acceleration_))
+  // --- Mid-episode disturbance injection (training only): once the policy
+  // has held balance for a while, occasionally kick the commanded
+  // acceleration so it has to learn to recover, not just hold still. ---
+  float disturbance_accel_frac = 0.0f;
+  if (training)
+  {
+    stable_step_count_ = is_balanced(theta, theta_dot, alpha) ? stable_step_count_ + 1 : 0;
+
+    if (
+      enable_perturbations_ && perturbation_steps_remaining_ == 0 &&
+      stable_step_count_ >= min_stable_steps_before_perturbation_)
+    {
+      std::uniform_real_distribution<float> trigger(0.0f, 1.0f);
+      if (trigger(rng_) < static_cast<float>(perturbation_probability_))
+      {
+        std::uniform_real_distribution<float> mag(
+          -static_cast<float>(perturbation_magnitude_),
+          static_cast<float>(perturbation_magnitude_));
+        current_perturbation_accel_ = mag(rng_);
+        perturbation_steps_remaining_ = perturbation_duration_steps_;
+        stable_step_count_ = 0;
+        RCLCPP_INFO(
+          get_node()->get_logger(), "Injecting disturbance: %.2f x max_acceleration for %d steps",
+          current_perturbation_accel_, perturbation_duration_steps_);
+      }
+    }
+
+    if (perturbation_steps_remaining_ > 0)
+    {
+      disturbance_accel_frac = current_perturbation_accel_;
+      --perturbation_steps_remaining_;
+    }
+  }
+
+  // Disturbance is allowed to push past the policy's own +/-1 action range
+  // (that's the point - it has to feel like an external kick) but is still
+  // bounded to a safety margin above max_acceleration_.
+  const double commanded_accel = std::clamp(
+    static_cast<double>(action) * max_acceleration_ +
+      static_cast<double>(disturbance_accel_frac) * max_acceleration_,
+    -1.5 * max_acceleration_, 1.5 * max_acceleration_);
+
+  if (!command_interfaces_[0].set_value(commanded_accel))
   {
     RCLCPP_ERROR_THROTTLE(
       get_node()->get_logger(), *get_node()->get_clock(), 1000,
@@ -496,17 +733,22 @@ controller_interface::return_type InvertedPendulumRlController::update(
           "Reward threshold (%.2f) exceeded - stopping learning and saving final weights.",
           reward_threshold_);
         enable_training_.store(false);
-        save_actor_checkpoint("final");
+        checkpoint_request_.store(CheckpointRequest::kFinal);
       }
       else if (rolling_avg > best_rolling_avg_)
       {
         best_rolling_avg_ = rolling_avg;
-        save_actor_checkpoint("best");
+        checkpoint_request_.store(CheckpointRequest::kBest);
       }
     }
 
-    current_episode_reward_ = 0.0;
-    episode_step_count_ = 0;
+    // Don't immediately reset counters and start acting again next cycle -
+    // hand off to the settling phase so the next episode starts from an
+    // actual rest state instead of whatever the system happened to be doing
+    // when the step counter rolled over.
+    episode_phase_ = EpisodePhase::kSettling;
+    settle_stable_count_ = 0;
+    settle_step_count_ = 0;
   }
 
   return controller_interface::return_type::OK;

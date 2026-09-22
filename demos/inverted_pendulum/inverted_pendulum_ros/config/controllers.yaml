@@ -112,7 +112,7 @@ inverted_pendulum_rl_controller:
     pendulum_joint_vel_name: pendulum_joint/velocity
     motor_joint_command_name: motor_joint/acceleration
 
-    max_acceleration: 100.0
+    max_acceleration: 150.0
     enable_training: true
 
     actor_lr: 0.0001
@@ -125,7 +125,7 @@ inverted_pendulum_rl_controller:
     batch_size: 64
     min_buffer_size_to_train: 256
     replay_buffer_capacity: 100000
-    episode_length: 500
+    episode_length: 1000
     mirror_augmentation: true
 
     actor_weights_path: ""  # empty -> random init
