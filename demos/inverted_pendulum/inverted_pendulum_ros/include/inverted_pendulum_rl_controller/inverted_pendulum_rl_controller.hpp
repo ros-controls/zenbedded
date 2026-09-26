@@ -29,6 +29,8 @@
 #include "controller_interface/controller_interface.hpp"
 #include "inverted_pendulum_rl_controller/actor_critic.hpp"
 #include "inverted_pendulum_rl_controller/replay_buffer.hpp"
+#include "inverted_pendulum_rl_controller/reward.hpp"
+#include "inverted_pendulum_rl_controller/run_config.hpp"
 
 namespace inverted_pendulum_rl_controller
 {
@@ -80,9 +82,17 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
-  static constexpr int kHistoryLen = 10;
+  // 5 stacked timesteps (was 10) * 6 features = 30-dim state (was 60). Tied
+  // to tiny_nn::kStateDim at compile time below so the two can never drift
+  // out of sync silently - if you change one, change both, and the
+  // static_assert will tell you if you forget.
+  static constexpr int kHistoryLen = 5;
   static constexpr int kFeaturesPerStep =
     6;  // [sin, cos, theta_dot, alpha, alpha_dot, prev_action]
+  static_assert(
+    kHistoryLen * kFeaturesPerStep == tiny_nn::kStateDim,
+    "kHistoryLen * kFeaturesPerStep must match tiny_nn::kStateDim (actor_critic.hpp) - "
+    "update both together.");
 
   // Episode lifecycle: kRunning is the normal policy/training loop. kSettling
   // is entered once an episode ends: the controller commands zero
@@ -108,7 +118,12 @@ private:
   double critic_lr_ = 1e-3;
   double gamma_ = 0.99;
   double tau_ = 0.005;
-  double exploration_noise_std_ = 0.1;
+
+  // Exploration noise and decay
+  double exploration_noise_std_ = 1.0;
+  double exploration_noise_std_min_ = 0.01;
+  double exploration_noise_decay_ = 0.995;
+
   double state_noise_std_ = 0.01;
   double reward_threshold_ = 18.0;
   int batch_size_ = 64;
@@ -116,8 +131,35 @@ private:
   int replay_buffer_capacity_ = 100000;
   int episode_length_ = 500;
   bool mirror_augmentation_ = true;
+
+  // Observation velocity scaling
+  double obs_vel_scale_ = 0.1;
+  double obs_vel_clip_ = 2.0;
+
+  // Background thread update caps
+  int train_updates_per_env_step_ = 1;
+
   std::string actor_weights_path_load_;
   std::string weights_save_dir_;
+
+  // If a mismatch is found between a loaded checkpoint's recorded
+  // run_config and this instance's current parameters, abort on_configure()
+  // (SystemExit-equivalent) unless this is true, in which case warn and
+  // continue - mirrors run_config.py's --ignore-config-mismatch.
+  bool ignore_config_mismatch_ = false;
+
+  // Reward shaping weights - see reward.hpp for the full derivation of each
+  // term; this is the single source of truth for the reward math itself.
+  RewardWeights reward_weights_;
+
+  // Hard physical safety limit on motor/arm position (centering target is
+  // 0; the rig's real travel is +-135 deg). Enforced two ways: (1) the
+  // commanded acceleration is clamped so it can never be commanded further
+  // past the limit, regardless of what the policy outputs, active in BOTH
+  // training and inference; (2) during training, reaching the limit ends
+  // the episode early (see reward.hpp's k_alive_offset doc comment for why
+  // that isn't a free local optimum for the policy to exploit).
+  double motor_pos_limit_rad_ = 2.356194;  // 135 deg
 
   // -- "settle to rest between episodes" parameters --
   // An episode is only allowed to (re)start once both joint speeds have
@@ -177,15 +219,18 @@ private:
 
   std::thread training_thread_;
   std::atomic_bool training_thread_should_run_{false};
+  std::atomic<int> train_steps_available_{0};
 
   std::deque<std::array<float, kFeaturesPerStep>> state_history_;
   std::vector<float> last_flat_state_;
   bool has_last_state_ = false;
   float prev_action_ = 0.0f;
   float prev_prev_action_ = 0.0f;  // for the action-smoothness ("minimum effort") reward term
+  float prev_motor_vel_ = 0.0f;    // for the optional motor-jerk reward term
 
   double current_episode_reward_ = 0.0;
   int episode_step_count_ = 0;
+  int total_episode_count_ = 0;
   std::vector<double> episode_rolling_rewards_;
   double best_rolling_avg_ = -std::numeric_limits<double>::infinity();
 
@@ -213,8 +258,6 @@ private:
 
   // -- helpers --
   static float wrap_angle(float angle);
-  static float compute_reward(
-    float theta, float theta_dot, float alpha, float alpha_dot, float action, float prev_action);
   static bool is_balanced(float theta, float theta_dot, float alpha);
   std::vector<float> flatten_history() const;
   static tiny_nn::Transition mirror_transition(const tiny_nn::Transition & t);
@@ -223,6 +266,9 @@ private:
   void stop_training_thread();
   void training_thread_main();
   bool save_actor_checkpoint_net(const tiny_nn::ActorNet & net, const std::string & suffix) const;
+  // The config recorded alongside every checkpoint and checked against on
+  // load - see run_config.hpp.
+  run_config::ConfigMap build_run_config() const;
 };
 
 }  // namespace inverted_pendulum_rl_controller

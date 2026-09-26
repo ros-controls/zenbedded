@@ -38,15 +38,15 @@
             <param name="motor_max_velocity">7.0</param>
             <param name="motor_max_acceleration">200.0</param>
             <param name="motor_max_torque">0.6</param>
-            <param name="model_step_loss">true</param>
+            <param name="model_step_loss">false</param>
             <param name="hard_stop_restitution">0.0</param>
 
             <!-- Sensors -->
             <param name="motor_steps_per_rev">3200</param>
             <param name="encoder_counts_per_rev">4096</param>
-            <param name="encoder_noise">0.0004</param>
+            <param name="encoder_noise">0.000</param>
             <param name="pendulum_velocity_from_encoder">false</param>
-            <param name="velocity_filter_alpha">0.5</param>
+            <param name="velocity_filter_alpha">0.99</param>
             <param name="pendulum_report_offset">0.0</param>
 
             <!-- Randomness -->

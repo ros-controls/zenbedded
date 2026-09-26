@@ -99,11 +99,13 @@ inverted_pendulum_controller:
     # -------------------------------------------------------------------------
     motor_accel_max: 150.0  # hard clamp on u             [rad/s²]
 
+# Recommended first stable-training configuration for the custom DDPG
+# inverted/Furuta pendulum controller.
+#
+# Start with perturbations, sensor noise and mirror augmentation OFF.
+# Once the policy reliably holds the zero position, turn those back on one
+# at a time.
 
-
-# ---------------------------------------------------------------------------
-# TRAINING (against mock_pendulum_hardware): leave enable_training true.
-# ---------------------------------------------------------------------------
 inverted_pendulum_rl_controller:
   ros__parameters:
     motor_joint_state_name: motor_joint/position
@@ -113,23 +115,55 @@ inverted_pendulum_rl_controller:
     motor_joint_command_name: motor_joint/acceleration
 
     max_acceleration: 150.0
-    enable_training: true
 
-    actor_lr: 0.0001
-    critic_lr: 0.001
+    # Conservative DDPG learning rates.
+    actor_lr: 0.00001
+    critic_lr: 0.0001
     gamma: 0.99
     tau: 0.005
-    exploration_noise_std: 0.1
-    state_noise_std: 0.01
+
+    # Broad exploration is intentional because the episode starts at the
+    # downward +/-pi state and the agent must discover a swing-up trajectory.
+    exploration_noise_std: 0.15
+    state_noise_std: 0.0
+
+    # Swing-up shaping uses cos(theta): theta ~= +/-pi is the normal start,
+    # theta=0 is the upright target. Maximum reward is 20 at the target.
     reward_threshold: 18.0
+
     batch_size: 64
-    min_buffer_size_to_train: 256
+    min_buffer_size_to_train: 2000
+
+    # Actual stepper-motor travel is +/-135 deg. The soft limit protects the hardware.
+    motor_limit_rad: 2.35619449
+    motor_soft_limit_rad: 2.18166156
+
+    # During the first 2000 transitions, hold each random action for 20 control cycles
+    # so the motor receives coherent excitation instead of zero-mean white noise.
+    warmup_action_max: 0.75
+    warmup_action_hold_steps: 20
     replay_buffer_capacity: 100000
     episode_length: 1000
-    mirror_augmentation: true
 
-    actor_weights_path: ""  # empty -> random init
-    weights_save_dir: "./rl_weights"
+    # Disable symmetry augmentation until the baseline controller is stable.
+    mirror_augmentation: false
+
+    # Start without injected disturbances. Re-enable after the base balance
+    # policy is stable.
+    enable_perturbations: false
+    perturbation_probability: 0.003
+    perturbation_magnitude: 0.6
+    perturbation_duration_steps: 4
+    min_stable_steps_before_perturbation: 150
+
+    settle_velocity_threshold: 0.05
+    settle_hold_steps: 20
+    settle_timeout_steps: 1000
+
+    enable_training: true
+    actor_weights_path: ""
+    weights_save_dir: "./furuta_rl_weights"
+
 
 # ---------------------------------------------------------------------------
 # DEPLOYMENT (against ZenbeddedHardware on the real robot): copy this block

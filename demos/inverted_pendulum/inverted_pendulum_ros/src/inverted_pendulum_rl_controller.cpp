@@ -47,12 +47,17 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_init()
     auto_declare<std::string>("pendulum_joint_vel_name", "pendulum_joint/velocity");
     auto_declare<std::string>("motor_joint_command_name", "motor_joint/acceleration");
 
-    auto_declare<double>("max_acceleration", 50.0);
+    auto_declare<double>("max_acceleration", 120.0);
     auto_declare<double>("actor_lr", 1e-4);
     auto_declare<double>("critic_lr", 1e-3);
     auto_declare<double>("gamma", 0.99);
     auto_declare<double>("tau", 0.005);
-    auto_declare<double>("exploration_noise_std", 0.1);
+
+    // Decay exploration parameters
+    auto_declare<double>("exploration_noise_std", 1.0);
+    auto_declare<double>("exploration_noise_std_min", 0.01);
+    auto_declare<double>("exploration_noise_decay", 0.995);
+
     auto_declare<double>("state_noise_std", 0.01);
     auto_declare<double>("reward_threshold", 18.0);
     auto_declare<int>("batch_size", 64);
@@ -60,6 +65,32 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_init()
     auto_declare<int>("replay_buffer_capacity", 100000);
     auto_declare<int>("episode_length", 500);
     auto_declare<bool>("mirror_augmentation", true);
+    auto_declare<bool>("ignore_config_mismatch", false);
+
+    // Observation velocity scaling to prevent network saturation
+    auto_declare<double>("obs_vel_scale", 0.1);
+    auto_declare<double>("obs_vel_clip", 2.0);
+
+    // Cap background thread updates per environment step
+    auto_declare<int>("train_updates_per_env_step", 1);
+
+    // -- motor position hard safety limit --
+    auto_declare<double>("motor_pos_limit_rad", 2.356194);  // 135 deg
+
+    // -- reward shaping weights (see reward.hpp) --
+    auto_declare<double>("reward.k_pen_vel", 0.02);
+    auto_declare<double>("reward.k_motor_pos", 0.8);
+    auto_declare<double>("reward.k_motor_vel", 0.01);
+    auto_declare<double>("reward.k_action", 0.05);
+    auto_declare<double>("reward.k_action_rate", 0.03);
+    auto_declare<double>("reward.k_motor_jerk", 0.0);
+    auto_declare<double>("reward.k_stillness_bonus", 0.0);
+    auto_declare<double>("reward.sigma_theta", 0.3);
+    auto_declare<double>("reward.sigma_motor_vel", 1.0);
+    auto_declare<double>("reward.k_alive_offset", 15.0);
+    auto_declare<double>("reward.k_upright_alive", 5.0);
+    auto_declare<double>("reward.alive_theta_band", 0.2618);
+    auto_declare<double>("reward.alive_pen_vel_limit", 2.0);
 
     // -- settle-to-rest between episodes --
     auto_declare<double>("settle_velocity_threshold", 0.05);
@@ -142,7 +173,11 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
   critic_lr_ = node->get_parameter("critic_lr").as_double();
   gamma_ = node->get_parameter("gamma").as_double();
   tau_ = node->get_parameter("tau").as_double();
+
   exploration_noise_std_ = node->get_parameter("exploration_noise_std").as_double();
+  exploration_noise_std_min_ = node->get_parameter("exploration_noise_std_min").as_double();
+  exploration_noise_decay_ = node->get_parameter("exploration_noise_decay").as_double();
+
   state_noise_std_ = node->get_parameter("state_noise_std").as_double();
   reward_threshold_ = node->get_parameter("reward_threshold").as_double();
   batch_size_ = static_cast<int>(node->get_parameter("batch_size").as_int());
@@ -152,8 +187,42 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
     static_cast<int>(node->get_parameter("replay_buffer_capacity").as_int());
   episode_length_ = static_cast<int>(node->get_parameter("episode_length").as_int());
   mirror_augmentation_ = node->get_parameter("mirror_augmentation").as_bool();
+
+  obs_vel_scale_ = node->get_parameter("obs_vel_scale").as_double();
+  obs_vel_clip_ = node->get_parameter("obs_vel_clip").as_double();
+  train_updates_per_env_step_ =
+    static_cast<int>(node->get_parameter("train_updates_per_env_step").as_int());
+
   actor_weights_path_load_ = node->get_parameter("actor_weights_path").as_string();
   weights_save_dir_ = node->get_parameter("weights_save_dir").as_string();
+  ignore_config_mismatch_ = node->get_parameter("ignore_config_mismatch").as_bool();
+  motor_pos_limit_rad_ = node->get_parameter("motor_pos_limit_rad").as_double();
+
+  reward_weights_.k_pen_vel =
+    static_cast<float>(node->get_parameter("reward.k_pen_vel").as_double());
+  reward_weights_.k_motor_pos =
+    static_cast<float>(node->get_parameter("reward.k_motor_pos").as_double());
+  reward_weights_.k_motor_vel =
+    static_cast<float>(node->get_parameter("reward.k_motor_vel").as_double());
+  reward_weights_.k_action = static_cast<float>(node->get_parameter("reward.k_action").as_double());
+  reward_weights_.k_action_rate =
+    static_cast<float>(node->get_parameter("reward.k_action_rate").as_double());
+  reward_weights_.k_motor_jerk =
+    static_cast<float>(node->get_parameter("reward.k_motor_jerk").as_double());
+  reward_weights_.k_stillness_bonus =
+    static_cast<float>(node->get_parameter("reward.k_stillness_bonus").as_double());
+  reward_weights_.sigma_theta =
+    static_cast<float>(node->get_parameter("reward.sigma_theta").as_double());
+  reward_weights_.sigma_motor_vel =
+    static_cast<float>(node->get_parameter("reward.sigma_motor_vel").as_double());
+  reward_weights_.k_alive_offset =
+    static_cast<float>(node->get_parameter("reward.k_alive_offset").as_double());
+  reward_weights_.k_upright_alive =
+    static_cast<float>(node->get_parameter("reward.k_upright_alive").as_double());
+  reward_weights_.alive_theta_band =
+    static_cast<float>(node->get_parameter("reward.alive_theta_band").as_double());
+  reward_weights_.alive_pen_vel_limit =
+    static_cast<float>(node->get_parameter("reward.alive_pen_vel_limit").as_double());
 
   settle_velocity_threshold_ = node->get_parameter("settle_velocity_threshold").as_double();
   settle_hold_steps_ = static_cast<int>(node->get_parameter("settle_hold_steps").as_int());
@@ -161,7 +230,11 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
 
   enable_perturbations_ = node->get_parameter("enable_perturbations").as_bool();
   perturbation_probability_ = node->get_parameter("perturbation_probability").as_double();
-  perturbation_magnitude_ = node->get_parameter("perturbation_magnitude").as_double();
+  // uniform_real_distribution requires a <= b; a negative magnitude here
+  // would flip that (mag(-neg, +neg) = mag(positive, negative)) and hit the
+  // same class of libstdc++ assertion-abort as the normal_distribution
+  // stddev issue above. Clamp defensively rather than trusting the param.
+  perturbation_magnitude_ = std::abs(node->get_parameter("perturbation_magnitude").as_double());
   perturbation_duration_steps_ =
     static_cast<int>(node->get_parameter("perturbation_duration_steps").as_int());
   min_stable_steps_before_perturbation_ =
@@ -174,6 +247,45 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
 
   if (!actor_weights_path_load_.empty())
   {
+    // Provenance check BEFORE load(): a state_dim/history_len mismatch is
+    // already caught by load() itself (actor_critic.hpp's format-version
+    // guard) and falls back to random init below, but this check also
+    // catches non-shape mismatches load() can't see (action scaling,
+    // reward shape) and gives a specific, actionable message instead of a
+    // bare "load failed". Mirrors run_config.py's check_config().
+    const auto saved_config = run_config::find_run_config(actor_weights_path_load_);
+    if (saved_config)
+    {
+      const auto result = run_config::check(*saved_config, build_run_config());
+      if (!result.ok())
+      {
+        const std::string msg =
+          "config mismatch against '" + actor_weights_path_load_ + "'s recorded run_config:";
+        if (ignore_config_mismatch_)
+        {
+          RCLCPP_WARN(node->get_logger(), "%s", msg.c_str());
+          for (const auto & line : result.mismatches)
+          {
+            RCLCPP_WARN(node->get_logger(), "%s", line.c_str());
+          }
+          RCLCPP_WARN(node->get_logger(), "ignore_config_mismatch=true; continuing anyway.");
+        }
+        else
+        {
+          RCLCPP_ERROR(node->get_logger(), "%s", msg.c_str());
+          for (const auto & line : result.mismatches)
+          {
+            RCLCPP_ERROR(node->get_logger(), "%s", line.c_str());
+          }
+          RCLCPP_ERROR(
+            node->get_logger(),
+            "Fix parameters to match the checkpoint's config, or set "
+            "ignore_config_mismatch:=true to load anyway.");
+          return controller_interface::CallbackReturn::ERROR;
+        }
+      }
+    }
+
     if (actor_->load(actor_weights_path_load_))
     {
       RCLCPP_INFO(
@@ -182,7 +294,9 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
     else
     {
       RCLCPP_ERROR(
-        node->get_logger(), "Failed to load actor weights from '%s'; starting from random init.",
+        node->get_logger(),
+        "Failed to load actor weights from '%s' (missing file, or a shape/format-version "
+        "mismatch - see actor_critic.hpp); starting from random init.",
         actor_weights_path_load_.c_str());
     }
   }
@@ -260,6 +374,29 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_configure(
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
+run_config::ConfigMap InvertedPendulumRlController::build_run_config() const
+{
+  // Enforced (checked by run_config::check()): change the observation/
+  // action layout or the objective's meaning, so a checkpoint trained with
+  // different values would behave nonsensically if loaded silently.
+  // Provenance-only (see run_config.hpp's provenance_only_keys()): recorded
+  // for reference but never blocks a load.
+  run_config::ConfigMap config;
+  config["state_dim"] = std::to_string(tiny_nn::kStateDim);
+  config["history_len"] = std::to_string(kHistoryLen);
+  config["features_per_step"] = std::to_string(kFeaturesPerStep);
+  config["max_acceleration"] = std::to_string(max_acceleration_);
+  config["motor_pos_limit_rad"] = std::to_string(motor_pos_limit_rad_);
+  config["mirror_augmentation"] = mirror_augmentation_ ? "true" : "false";
+  config["gamma"] = std::to_string(gamma_);
+  config["tau"] = std::to_string(tau_);
+  config["actor_lr"] = std::to_string(actor_lr_);
+  config["critic_lr"] = std::to_string(critic_lr_);
+  config["obs_vel_scale"] = std::to_string(obs_vel_scale_);
+  config["obs_vel_clip"] = std::to_string(obs_vel_clip_);
+  return config;
+}
+
 void InvertedPendulumRlController::reset_episode_state()
 {
   state_history_.clear();
@@ -273,6 +410,7 @@ void InvertedPendulumRlController::reset_episode_state()
   last_flat_state_.clear();
   prev_action_ = 0.0f;
   prev_prev_action_ = 0.0f;
+  prev_motor_vel_ = 0.0f;
 
   current_episode_reward_ = 0.0;
   episode_step_count_ = 0;
@@ -312,6 +450,9 @@ controller_interface::CallbackReturn InvertedPendulumRlController::on_activate(
   best_rolling_avg_ = -std::numeric_limits<double>::infinity();
   episode_phase_ = EpisodePhase::kRunning;
 
+  total_episode_count_ = 0;
+  train_steps_available_.store(0);
+
   start_training_thread();
 
   return controller_interface::CallbackReturn::SUCCESS;
@@ -348,33 +489,6 @@ bool InvertedPendulumRlController::is_balanced(float theta, float theta_dot, flo
   constexpr float kUprightRateMax = 2.0f;  // rad/s
   return std::abs(theta) <= kUprightRad && std::abs(theta_dot) <= kUprightRateMax &&
          std::abs(alpha) <= kCenteredRad;
-}
-
-float InvertedPendulumRlController::compute_reward(
-  float theta, float theta_dot, float alpha, float alpha_dot, float action, float prev_action)
-{
-  const float action_delta = action - prev_action;
-
-  // Quadratic cost on: upright angle, angular rates, arm (centering) position,
-  // actuation effort, and actuation smoothness (a jerky-but-zero-mean action
-  // sequence "costs" the same as a smooth one under a pure |action| penalty,
-  // so the smoothness term is what actually buys minimum-effort behavior).
-  float r =
-    -(theta * theta + 0.02f * theta_dot * theta_dot +
-      0.8f * alpha * alpha +  // raised from 0.5: stronger centering pressure
-      0.01f * alpha_dot * alpha_dot + 0.05f * action * action +  // effort
-      0.03f * action_delta * action_delta                        // smoothness / minimum-effort
-    );
-  r += 15.0f;  // Alive offset.
-
-  // Upright-AND-centered alive bonus (previously only checked upright, which
-  // let the policy leave the arm off-center indefinitely with no penalty
-  // beyond the small quadratic shaping term).
-  if (is_balanced(theta, theta_dot, alpha))
-  {
-    r += 5.0f;
-  }
-  return r;
 }
 
 std::vector<float> InvertedPendulumRlController::flatten_history() const
@@ -445,6 +559,12 @@ void InvertedPendulumRlController::training_thread_main()
       continue;
     }
 
+    if (train_steps_available_.load() <= 0)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      continue;
+    }
+
     size_t buffer_size = 0;
     {
       std::lock_guard<std::mutex> lock(replay_mutex_);
@@ -512,6 +632,8 @@ void InvertedPendulumRlController::training_thread_main()
       std::lock_guard<std::mutex> lock(actor_infer_mutex_);
       actor_->copy_from(*actor_learn_);
     }
+
+    train_steps_available_.fetch_sub(1);
   }
 }
 
@@ -535,6 +657,15 @@ bool InvertedPendulumRlController::save_actor_checkpoint_net(
   if (ok)
   {
     RCLCPP_INFO(get_node()->get_logger(), "Saved actor checkpoint to '%s'", path.c_str());
+    // Sibling run_config, checked by whatever later loads this checkpoint
+    // (see the on_configure() provenance check above).
+    const std::string config_path = weights_save_dir_ + "/actor_" + suffix + ".config.txt";
+    if (!run_config::save(config_path, build_run_config()))
+    {
+      RCLCPP_WARN(
+        get_node()->get_logger(), "Failed to save run_config alongside '%s' (non-fatal)",
+        path.c_str());
+    }
   }
   else
   {
@@ -560,6 +691,11 @@ controller_interface::return_type InvertedPendulumRlController::update(
   float theta_dot = static_cast<float>(pendulum_vel);
   float alpha = static_cast<float>(motor_pos);
   float alpha_dot = static_cast<float>(motor_vel);
+
+  // Clean (un-noised) motor position, kept separate from `alpha` below once
+  // training noise is mixed in - hardware safety must never be fooled by
+  // synthetic domain-randomization noise.
+  const float alpha_raw = alpha;
 
   // --- Settling phase: wait for the system to actually stop moving before
   // the next episode is allowed to start. No policy/exploration/training
@@ -599,16 +735,26 @@ controller_interface::return_type InvertedPendulumRlController::update(
   }
 
   // Domain-randomization noise, training only (never perturbs real sensor
-  // readings used for actual balancing/deployment).
-  if (training)
+  // readings used for actual balancing/deployment). std::normal_distribution
+  // requires stddev > 0 (libstdc++ asserts on exactly 0, rather than just
+  // degenerating to "always returns the mean" - it aborts the process), so
+  // state_noise_std=0 has to be handled as "no noise", not "zero-width noise".
+  if (training && state_noise_std_ > 0.0)
   {
     std::normal_distribution<float> noise(0.0f, static_cast<float>(state_noise_std_));
     alpha += noise(rng_);
     theta += noise(rng_);
   }
 
+  const float scaled_theta_dot = std::clamp(
+    theta_dot * static_cast<float>(obs_vel_scale_), -static_cast<float>(obs_vel_clip_),
+    static_cast<float>(obs_vel_clip_));
+  const float scaled_alpha_dot = std::clamp(
+    alpha_dot * static_cast<float>(obs_vel_scale_), -static_cast<float>(obs_vel_clip_),
+    static_cast<float>(obs_vel_clip_));
+
   const std::array<float, kFeaturesPerStep> current_obs = {
-    std::sin(theta), std::cos(theta), theta_dot, alpha, alpha_dot, prev_action_};
+    std::sin(theta), std::cos(theta), scaled_theta_dot, alpha, scaled_alpha_dot, prev_action_};
 
   state_history_.push_back(current_obs);
   while (state_history_.size() > static_cast<size_t>(kHistoryLen))
@@ -616,8 +762,10 @@ controller_interface::return_type InvertedPendulumRlController::update(
     state_history_.pop_front();
   }
 
-  const float reward =
-    compute_reward(theta, theta_dot, alpha, alpha_dot, prev_action_, prev_prev_action_);
+  const float reward = compute_reward(
+    theta, theta_dot, alpha, alpha_dot, prev_action_, prev_prev_action_, prev_motor_vel_,
+    reward_weights_);
+  prev_motor_vel_ = alpha_dot;
   current_episode_reward_ += reward;
   ++episode_step_count_;
 
@@ -632,6 +780,7 @@ controller_interface::return_type InvertedPendulumRlController::update(
     {
       replay_buffer_->push(mirror_transition(transition));
     }
+    train_steps_available_.fetch_add(train_updates_per_env_step_);
   }
   last_flat_state_ = flat_state;
   has_last_state_ = true;
@@ -645,7 +794,10 @@ controller_interface::return_type InvertedPendulumRlController::update(
     action = actor_->forward(flat_state);
   }
 
-  if (training)
+  // Same std::normal_distribution stddev>0 requirement as the state-noise
+  // block above - exploration_noise_std=0 ("pure exploitation, no explore
+  // noise") is a normal thing to want and must not crash the RT thread.
+  if (training && exploration_noise_std_ > 0.0)
   {
     std::normal_distribution<float> explore_noise(0.0f, static_cast<float>(exploration_noise_std_));
     action = std::clamp(action + explore_noise(rng_), -1.0f, 1.0f);
@@ -691,10 +843,25 @@ controller_interface::return_type InvertedPendulumRlController::update(
   // Disturbance is allowed to push past the policy's own +/-1 action range
   // (that's the point - it has to feel like an external kick) but is still
   // bounded to a safety margin above max_acceleration_.
-  const double commanded_accel = std::clamp(
+  double commanded_accel = std::clamp(
     static_cast<double>(action) * max_acceleration_ +
       static_cast<double>(disturbance_accel_frac) * max_acceleration_,
     -1.5 * max_acceleration_, 1.5 * max_acceleration_);
+
+  // Hard motor-position safety clamp - active in BOTH training and
+  // inference, independent of the RL policy: once the arm is at or past the
+  // +-motor_pos_limit_rad_ travel limit, refuse to command further motion
+  // in that direction (a residual command that would brake/reverse is still
+  // allowed). Uses alpha_raw (the un-noised reading), never the
+  // training-noised `alpha` used for reward/observations.
+  if (alpha_raw >= static_cast<float>(motor_pos_limit_rad_) && commanded_accel > 0.0)
+  {
+    commanded_accel = 0.0;
+  }
+  else if (alpha_raw <= -static_cast<float>(motor_pos_limit_rad_) && commanded_accel < 0.0)
+  {
+    commanded_accel = 0.0;
+  }
 
   if (!command_interfaces_[0].set_value(commanded_accel))
   {
@@ -706,6 +873,8 @@ controller_interface::return_type InvertedPendulumRlController::update(
 
   if (episode_step_count_ >= episode_length_)
   {
+    total_episode_count_++;
+
     const double avg_reward = current_episode_reward_ / static_cast<double>(episode_length_);
     episode_rolling_rewards_.push_back(avg_reward);
     if (episode_rolling_rewards_.size() > 10)
@@ -721,11 +890,15 @@ controller_interface::return_type InvertedPendulumRlController::update(
     rolling_avg /= static_cast<double>(episode_rolling_rewards_.size());
 
     RCLCPP_INFO(
-      get_node()->get_logger(), "Episode avg reward: %.2f | Rolling(10): %.2f%s", avg_reward,
-      rolling_avg, training ? "" : " [inference only]");
+      get_node()->get_logger(),
+      "Episode: %d | Avg reward: %.2f | Rolling(10): %.2f | Noise: %.3f%s", total_episode_count_,
+      avg_reward, rolling_avg, exploration_noise_std_, training ? "" : " [inference only]");
 
     if (training)
     {
+      exploration_noise_std_ =
+        std::max(exploration_noise_std_min_, exploration_noise_std_ * exploration_noise_decay_);
+
       if (rolling_avg > reward_threshold_)
       {
         RCLCPP_INFO(

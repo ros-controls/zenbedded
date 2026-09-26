@@ -158,6 +158,12 @@ CallbackReturn MockPendulumHardware::on_init(
   hw_states_.assign(4, 0.0);
   hw_commands_.assign(1, 0.0);
 
+  REGISTER_ROS2_CONTROL_INTROSPECTION("motor_joint/position", &hw_states_[0]);
+  REGISTER_ROS2_CONTROL_INTROSPECTION("motor_joint/velocity", &hw_states_[1]);
+  REGISTER_ROS2_CONTROL_INTROSPECTION("pendulum_joint/position", &hw_states_[2]);
+  REGISTER_ROS2_CONTROL_INTROSPECTION("pendulum_joint/velocity", &hw_states_[3]);
+  REGISTER_ROS2_CONTROL_INTROSPECTION("motor_joint/acceleration", &hw_commands_[0]);
+
   RCLCPP_INFO(
     logger(),
     "Furuta mock: L1=%.4f m, l2=%.4f m, m2=%.4f kg, J2_hinge=%.3e, stops=+-%.1f deg, "

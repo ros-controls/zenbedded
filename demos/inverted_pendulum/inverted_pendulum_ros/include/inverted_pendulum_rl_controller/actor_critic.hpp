@@ -13,10 +13,19 @@
 // limitations under the License.
 
 // Direct C++ port of the ActorNet / CriticNet from the Python NNFurutaController:
-//   Actor:  60 -> 64 (ReLU) -> 32 (ReLU) -> 1 (tanh)
-//   Critic: 61 -> 64 (ReLU) -> 32 (ReLU) -> 1 (linear)   [61 = 60-dim state + 1-dim action]
-// 60 = 10 stacked timesteps * 6 features [sin(theta), cos(theta), theta_dot, alpha, alpha_dot,
-// prev_action].
+//   Actor:  30 -> 64 (ReLU) -> 32 (ReLU) -> 1 (tanh)
+//   Critic: 31 -> 64 (ReLU) -> 32 (ReLU) -> 1 (linear)   [31 = 30-dim state + 1-dim action]
+// 30 = 5 stacked timesteps * 6 features [sin(theta), cos(theta), theta_dot, alpha, alpha_dot,
+// prev_action]. Hidden sizes (64/32) are left unchanged from the original 60-dim version:
+// at this parameter count (a few thousand weights either way) a 5-frame stack doesn't call
+// for a smaller net, and over-provisioning slightly is harmless here, whereas under-provisioning
+// would not be.
+//
+// kStateDim is written into the checkpoint file itself (see kFormatVersion below) and checked
+// on load, so a checkpoint saved by a build with a different kHistoryLen/kStateDim fails
+// load() loudly (falls back to random init, logged by the caller) instead of silently
+// loading mismatched weights into the wrong-shaped first layer - the same silent-mismatch
+// failure mode `run_config.py`'s `check_config()` exists to catch on the training side.
 
 #pragma once
 
@@ -31,9 +40,10 @@
 namespace tiny_nn
 {
 
-constexpr int kStateDim = 60;
+constexpr int kStateDim = 30;
 constexpr uint32_t kActorMagic = 0x4E465541;   // 'NFUA'
 constexpr uint32_t kCriticMagic = 0x4E465543;  // 'NFUC'
+constexpr uint32_t kFormatVersion = 2;         // bumped: v1 files were kStateDim=60
 
 class ActorNet
 {
@@ -93,6 +103,9 @@ public:
       return false;
     }
     f.write(reinterpret_cast<const char *>(&kActorMagic), sizeof(kActorMagic));
+    f.write(reinterpret_cast<const char *>(&kFormatVersion), sizeof(kFormatVersion));
+    const int32_t state_dim = kStateDim;
+    f.write(reinterpret_cast<const char *>(&state_dim), sizeof(state_dim));
     fc1_.write(f);
     fc2_.write(f);
     fc3_.write(f);
@@ -110,6 +123,17 @@ public:
     f.read(reinterpret_cast<char *>(&magic), sizeof(magic));
     if (magic != kActorMagic)
     {
+      return false;
+    }
+    uint32_t version = 0;
+    f.read(reinterpret_cast<char *>(&version), sizeof(version));
+    int32_t state_dim = 0;
+    f.read(reinterpret_cast<char *>(&state_dim), sizeof(state_dim));
+    if (!f || version != kFormatVersion || state_dim != kStateDim)
+    {
+      // Deliberately loud failure: an older/differently-shaped checkpoint
+      // (e.g. saved with kHistoryLen=10, kStateDim=60) must never be
+      // silently loaded into a differently-shaped network.
       return false;
     }
     return fc1_.read(f) && fc2_.read(f) && fc3_.read(f);
@@ -200,6 +224,9 @@ public:
       return false;
     }
     f.write(reinterpret_cast<const char *>(&kCriticMagic), sizeof(kCriticMagic));
+    f.write(reinterpret_cast<const char *>(&kFormatVersion), sizeof(kFormatVersion));
+    const int32_t state_dim = kStateDim;
+    f.write(reinterpret_cast<const char *>(&state_dim), sizeof(state_dim));
     fc1_.write(f);
     fc2_.write(f);
     fc3_.write(f);
@@ -216,6 +243,14 @@ public:
     uint32_t magic = 0;
     f.read(reinterpret_cast<char *>(&magic), sizeof(magic));
     if (magic != kCriticMagic)
+    {
+      return false;
+    }
+    uint32_t version = 0;
+    f.read(reinterpret_cast<char *>(&version), sizeof(version));
+    int32_t state_dim = 0;
+    f.read(reinterpret_cast<char *>(&state_dim), sizeof(state_dim));
+    if (!f || version != kFormatVersion || state_dim != kStateDim)
     {
       return false;
     }
