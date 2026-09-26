@@ -1,0 +1,11 @@
+mainmenu "Tier 1 Transport Test"
+
+source "Kconfig.zephyr"
+
+config TIER1_TEST_INGRESS
+    bool "Configure MCU as a Subscriber Only"
+    default y
+
+config TIER1_TEST_EGRESS
+    bool "Configure MCU as a Publisher Only"
+    default y
