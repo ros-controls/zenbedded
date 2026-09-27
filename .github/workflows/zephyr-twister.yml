@@ -48,18 +48,6 @@ jobs:
           rosdep install --from-paths src --ignore-src -r -y
           colcon build
 
-      - name: Apply zenoh-pico patches
-        shell: bash
-        run: |
-          PICO_PATH="/zephyr_ws/modules/lib/zenoh-pico"
-          for patch in patches/*.patch; do
-            if git -C "$PICO_PATH" apply --reverse --check "$GITHUB_WORKSPACE/$patch" 2>/dev/null; then
-              echo "$patch already applied, skipping"
-            else
-              git -C "$PICO_PATH" apply "$GITHUB_WORKSPACE/$patch"
-            fi
-          done
-
       - name: Run twister (build + run native_sim)
         shell: bash
         run: |
