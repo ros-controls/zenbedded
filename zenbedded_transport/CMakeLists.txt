@@ -8,6 +8,7 @@ zephyr_library_compile_definitions(Z_CONFIG_SOCKET_TIMEOUT=1)
 
 zephyr_compile_definitions(
   Z_FEATURE_UNSTABLE_API=1
+  Z_TRANSPORT_LEASE=60000
 )
 
 if(CONFIG_ZENBEDDED_TIER_1)
