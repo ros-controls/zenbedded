@@ -3,11 +3,13 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <zenoh-pico/config.h>
 #include <zephyr/kernel.h>
 
 #include "zenbedded_transport/serialization.h"
 #include "zenbedded_transport/zenoh_transport.h"
 
+#ifdef CONFIG_TIER1_TEST_INGRESS
 // 1. Define global context so the callback knows how to parse the incoming bytes
 zcdr_joint_command_ctx_t ctx_sub_1;
 
@@ -44,6 +46,7 @@ void cmd_1_rx_callback(const uint8_t * payload, size_t size, void * user_data)
     last_hz_time = current_time;
   }
 }
+#endif
 
 int main(void)
 {
@@ -55,6 +58,8 @@ int main(void)
 #ifdef CONFIG_ZENBEDDED_TIER_1
 
   // Pass Kconfig macros directly into the transport API
+  printf("[SYS] zenoh transport lease = %d ms\n", static_cast<int>(Z_TRANSPORT_LEASE));
+
   if (
     zenbedded_transport_init(
       CONFIG_ZENBEDDED_DOMAIN_ID, CONFIG_ZENBEDDED_NODE_NAME, CONFIG_ZENBEDDED_ZENOH_MODE,
@@ -67,29 +72,30 @@ int main(void)
   // --- MEMORY & SERIALIZATION SETUP ---
   const char * chassis_joints[] = {"stepper", "pendulum"};
 
+#ifdef CONFIG_TIER1_TEST_EGRESS
+  // --- PUBLISHER SETUP ---
   zcdr_joint_state_ctx_t ctx_joints;
   uint8_t buf_joints[512] = {0};
-
-  // Dummy buffer to initialize the read offset for the subscriber
-  uint8_t dummy_1[256] = {0};
-
   zcdr_init_joint_state(&ctx_joints, "base_link", chassis_joints, 2, buf_joints);
-  zcdr_init_joint_command(&ctx_sub_1, "base_link", chassis_joints, 2, "position", dummy_1);
 
-  // --- PUBLISHER DECLARATION ---
   zenbedded_pub_t pub_joints =
     zenbedded_transport_declare_publisher("joint_states", "sensor_msgs::msg::dds_::JointState_");
   k_msleep(10);  // Pace graph declarations
 
-  // --- SUBSCRIBER DECLARATION ---
-  zenbedded_transport_declare_subscriber(
-    "joint_commands", "control_msgs::msg::dds_::JointCommand_", cmd_1_rx_callback, &ctx_sub_1);
-  k_msleep(10);  // Pace graph declarations
-
-  // --- DATA PAYLOADS ---
   double pos_2[] = {0.0, 0.0};
   double vel_2[] = {0.0, 0.0};
   double eff_2[] = {0.0, 0.0};
+#endif
+
+#ifdef CONFIG_TIER1_TEST_INGRESS
+  // --- SUBSCRIBER SETUP ---
+  uint8_t dummy_1[256] = {0};
+  zcdr_init_joint_command(&ctx_sub_1, "base_link", chassis_joints, 2, "position", dummy_1);
+
+  zenbedded_transport_declare_subscriber(
+    "joint_commands", "control_msgs::msg::dds_::JointCommand_", cmd_1_rx_callback, &ctx_sub_1);
+  k_msleep(10);  // Pace graph declarations
+#endif
 
   // --- TIMING SETUP ---
   uint32_t last_100hz_time = k_uptime_get_32();
@@ -99,7 +105,7 @@ int main(void)
   while (1)
   {
     uint32_t current_time = k_uptime_get_32();
-
+#ifdef CONFIG_TIER1_TEST_EGRESS
     // 2. PUB 1: 100Hz LOOP (Every 10 ms)
     if ((current_time - last_100hz_time) >= 10)
     {
@@ -108,7 +114,7 @@ int main(void)
       pos_2[0] += 0.01;
       last_100hz_time = current_time;
     }
-
+#endif
     // Yield CPU for 1ms to prevent starvation on native_sim
     k_sleep(K_MSEC(1));
   }
