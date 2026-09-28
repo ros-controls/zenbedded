@@ -38,14 +38,10 @@ class TransportTestNode(Node):
 
 
 # --- THE TESTS ---
-
-
 def test_mcu_publishes_to_ros2(zenoh_router, dut: DeviceAdapter):
     """TEST A: MCU to Host Single Publisher."""
-    # 1. BOOT MCU FIRST: Let it claim the network ports
     dut.readlines_until(regex=r"\[SYS\] Entering High-Frequency Event Loop", timeout=TIMEOUT_SEC)
 
-    # 2. NOW boot ROS 2 Python Node
     rclpy.init()
     node = TransportTestNode()
     executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
@@ -54,10 +50,9 @@ def test_mcu_publishes_to_ros2(zenoh_router, dut: DeviceAdapter):
     try:
         msg_joints = node.rx_queues["joint_states"].get(timeout=TIMEOUT_SEC)
 
-        # SMART ASSERTIONS:
         assert list(msg_joints.name) == ["stepper", "pendulum"]
         assert len(msg_joints.position) == 2
-        assert msg_joints.position[1] == 0.0  # Pendulum position is static in main.cpp
+        assert msg_joints.position[1] == 0.0
 
     finally:
         rclpy.shutdown()
@@ -66,10 +61,8 @@ def test_mcu_publishes_to_ros2(zenoh_router, dut: DeviceAdapter):
 
 def test_ros2_commands_mcu(zenoh_router, dut: DeviceAdapter):
     """TEST B: Host to MCU Single Subscriber."""
-    # 1. BOOT MCU FIRST
     dut.readlines_until(regex=r"\[SYS\] Entering High-Frequency Event Loop", timeout=TIMEOUT_SEC)
 
-    # 2. NOW boot ROS 2 Python Node
     rclpy.init()
     node = TransportTestNode()
     executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
@@ -92,6 +85,49 @@ def test_ros2_commands_mcu(zenoh_router, dut: DeviceAdapter):
             )
         finally:
             node.destroy_timer(timer)
+
+    finally:
+        rclpy.shutdown()
+        executor_thread.join(timeout=1.0)
+
+
+def test_ingress_only(zenoh_router, dut: DeviceAdapter):
+    """TEST C: Ingress Only - 50s active bombardment followed by 50s network starvation."""
+    dut.readlines_until(regex=r"\[SYS\] Entering High-Frequency Event Loop", timeout=TIMEOUT_SEC)
+
+    rclpy.init()
+    node = TransportTestNode()
+    executor_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    executor_thread.start()
+
+    try:
+        cmd1 = JointCommand(
+            joint_names=["stepper", "pendulum"], interface_name="position", values=[10.0, -20.0]
+        )
+        cmd1.header.frame_id = "base_link"
+
+        timer = node.create_timer(0.1, lambda: node.pub_cmd_1.publish(cmd1))
+
+        dut.readlines_until(
+            regex=r"\[SUB 1\] Rate: \d+ Hz \| stepper: 10\.00 \| pendulum: -20\.00",
+            timeout=TIMEOUT_SEC,
+        )
+
+        time.sleep(50.0)
+
+        node.destroy_timer(timer)
+        time.sleep(70.0)
+
+        cmd2 = JointCommand(
+            joint_names=["stepper", "pendulum"], interface_name="position", values=[99.0, 99.0]
+        )
+        cmd2.header.frame_id = "base_link"
+        node.pub_cmd_1.publish(cmd2)
+
+        dut.readlines_until(
+            regex=r"\[SUB 1\] Rate: \d+ Hz \| stepper: 99\.00 \| pendulum: 99\.00",
+            timeout=TIMEOUT_SEC,
+        )
 
     finally:
         rclpy.shutdown()
