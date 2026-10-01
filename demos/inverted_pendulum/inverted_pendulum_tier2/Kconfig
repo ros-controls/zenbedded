@@ -1,0 +1,9 @@
+menu "Inverted Pendulum Tier1 Demo"
+
+config ENCODER_SAMPLING_THREAD_PRIORITY
+    int "Priority for the magnetic encoder's sampling thread"
+    default 0
+
+endmenu
+
+source "Kconfig.zephyr"
