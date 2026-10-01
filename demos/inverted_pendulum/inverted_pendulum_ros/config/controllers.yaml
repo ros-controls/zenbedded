@@ -7,14 +7,59 @@ controller_manager:
 
 inverted_pendulum_controller:
   ros__parameters:
-    motor_joint_state_name: motor_joint/position
-    motor_joint_vel_name: motor_joint/velocity
-    pendulum_joint_state_name: pendulum_joint/position
-    pendulum_joint_vel_name: pendulum_joint/velocity
-    motor_joint_command_name: motor_joint/acceleration
-    balance_angle: 0.0
-    kp: 75.0
-    kd: 15.0
-    k_motor_pos: 10.0
-    k_motor_vel: 11.0
-    max_acceleration: 30.0
+    # -------------------------------------------------------------------------
+    # Hardware interface names
+    # -------------------------------------------------------------------------
+    motor_joint_state_name: "motor_joint/position"
+    motor_joint_vel_name: "motor_joint/velocity"
+    pendulum_joint_state_name: "pendulum_joint/position"
+    pendulum_joint_vel_name: "pendulum_joint/velocity"
+    motor_joint_command_name: "motor_joint/acceleration"
+
+    # -------------------------------------------------------------------------
+    # Physical plant constants (matching CAD model & URDF)
+    # -------------------------------------------------------------------------
+    m2: 0.014        # pendulum mass              [kg]
+    l2: 0.051        # hinge -> COM               [m]
+    L1: 0.062        # motor axis -> hinge        [m]
+    J2: 4.447e-5     # pendulum hinge inertia     [kg*m^2]
+    g: 9.80665       # gravity                    [m/s^2]
+
+    # -------------------------------------------------------------------------
+    # LQR gains: u = -K * [q1, q1_dot, q2, q2_dot]
+    #
+    # Derived from continuous ARE on the linearized Furuta model about upright:
+    #   Q = diag(5.0, 0.5, 80.0, 3.0),  R = 0.2
+    # Closed-loop poles: -14.87, -10.67, -1.76 +- 1.37i (asymptotically stable)
+    # -------------------------------------------------------------------------
+    k_q1: -5.000
+    k_q1_vel: -4.352
+    k_q2: 418.238
+    k_q2_vel: 33.281
+
+    # -------------------------------------------------------------------------
+    # Swing-up (Non-linear Energy Shaping)
+    #
+    # Pumping drives pendulum mechanical energy toward E_target = m2 * g * l2.
+    # Saturated bang-bang law overcomes hinge Coulomb stiction:
+    #   u_pump = swing_accel_max * sign( -(E - E_target) * q2_dot * cos(q2) )
+    # -------------------------------------------------------------------------
+    k_e: 80.0             # energy gain multiplier
+    k_arm: 31.0           # arm P-recentering gain     [rad/s^2 per rad]
+    k_arm_vel: 6.0        # arm D-recentering gain     [rad/s^2 per rad/s]
+    swing_start_vel: 0.01 # dead-start kick threshold  [rad/s]
+    swing_accel_max: 100.0 # pump saturation            [rad/s^2]
+    arm_zone: 2.0         # pump disabled beyond       [rad]  (~115 deg)
+
+    # -------------------------------------------------------------------------
+    # Mode transitions & Gating
+    # -------------------------------------------------------------------------
+    catch_angle: 0.20         # candidate window           [rad]  (~11.5 deg)
+    fall_angle: 0.60          # exit LQR boundary          [rad]  (~34.4 deg)
+    catch_cmd_fraction: 0.60  # max |u_lqr| / motor_accel_max to allow catch
+    catch_ramp_steps: 10      # cycles to ramp in LQR command smoothly
+
+    # -------------------------------------------------------------------------
+    # Safety limits
+    # -------------------------------------------------------------------------
+    motor_accel_max: 150.0   # hard clamp on u            [rad/s^2]
