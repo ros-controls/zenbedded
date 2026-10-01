@@ -146,7 +146,7 @@ config NET_BUF_RX_COUNT
     default 32
 
 config NET_BUF_TX_COUNT
-    default 128
+    default 32
 
 config NET_PKT_RX_COUNT
     default 32
