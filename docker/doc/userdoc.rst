@@ -24,6 +24,7 @@ The image is based on ``ros:lyrical-ros-base`` and adds:
 
 - ``ros-lyrical-ros2-control``, ``ros-lyrical-ros2-controllers``
 - ``rmw_zenoh_cpp`` (ROS 2 middleware)
+- ``raylib`` (built from raysan5/raylib for 3D simulation and visualizers)
 - Zephyr SDK 1.0.1 with ESP32 (``xtensa-espressif_esp32_zephyr-elf``,
   ``xtensa-espressif_esp32s3_zephyr-elf``) and ARM toolchains
 - ``west`` and Zephyr Python dependencies
