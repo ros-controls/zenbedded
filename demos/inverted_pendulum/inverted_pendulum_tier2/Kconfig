@@ -1,9 +1,124 @@
-menu "Inverted Pendulum Tier1 Demo"
+menu "Inverted Pendulum Tier 2 Demo"
 
 config ENCODER_SAMPLING_THREAD_PRIORITY
     int "Priority for the magnetic encoder's sampling thread"
     default 0
 
+choice INVERTED_PENDULUM_COMM_INTERFACE
+    prompt "Communication Transport Interface"
+    default INVERTED_PENDULUM_COMM_USB_CDC
+    help
+      Select the physical transport used to connect the Tier 2
+      microcontroller to the Zenoh network / Host PC.
+
+    config INVERTED_PENDULUM_COMM_WIFI
+        bool "Wi-Fi Interface"
+        select WIFI
+        select WIFI_NM
+        select WIFI_CREDENTIALS
+        select WIFI_CREDENTIALS_CONNECT_STORED
+        select NET_L2_WIFI_SHELL
+        select WIFI_CREDENTIALS_SHELL
+        select NET_DHCPV4
+        help
+          Connect to the Zenoh network over 802.11 Wi-Fi station mode using
+          stored credentials.
+
+    config INVERTED_PENDULUM_COMM_USB_CDC
+        bool "USB CDC (Ethernet) Interface"
+        select USB_DEVICE_STACK_NEXT
+        select NET_L2_ETHERNET
+        select USBD_CDC_ECM_CLASS
+        help
+          Connect to the Zenoh network over USB CDC ECM (Ethernet emulation)
+          for low-latency, jitter-free wired communication.
+
+endchoice
+
+config WIFI_ESP32
+    default y if INVERTED_PENDULUM_COMM_WIFI && SOC_FAMILY_ESPRESSIF_ESP32
+
+config ESP32_WIFI_STA_AUTO_DHCPV4
+    default y if INVERTED_PENDULUM_COMM_WIFI && SOC_FAMILY_ESPRESSIF_ESP32
+
+config ESP32_WIFI_STA_RECONNECT
+    default y if INVERTED_PENDULUM_COMM_WIFI && SOC_FAMILY_ESPRESSIF_ESP32
+
+if INVERTED_PENDULUM_COMM_USB_CDC
+
+    config INVERTED_PENDULUM_USB_CDC_STATIC_IP
+        bool "Configure static IPv4 address on USB CDC interface"
+        default y
+        select NET_CONFIG_SETTINGS
+        help
+          Configure a deterministic static IPv4 address for the USB CDC interface
+          so a DHCP server is not required on the host PC.
+
+    config INVERTED_PENDULUM_USB_CDC_MY_IPV4_ADDR
+        string "Device USB CDC IPv4 address"
+        depends on INVERTED_PENDULUM_USB_CDC_STATIC_IP
+        default "192.0.2.2"
+        help
+          IPv4 address assigned to the ESP32-S3 USB CDC interface.
+
+    config INVERTED_PENDULUM_USB_CDC_PEER_IPV4_ADDR
+        string "Host PC USB CDC IPv4 address"
+        depends on INVERTED_PENDULUM_USB_CDC_STATIC_IP
+        default "192.0.2.1"
+        help
+          IPv4 address of the host machine on the USB CDC link.
+
+    config INVERTED_PENDULUM_USB_CDC_NETMASK
+        string "Device USB CDC IPv4 Netmask"
+        depends on INVERTED_PENDULUM_USB_CDC_STATIC_IP
+        default "255.255.255.0"
+        help
+          IPv4 netmask of the USB CDC interface.
+
+    config NET_CONFIG_MY_IPV4_ADDR
+        default INVERTED_PENDULUM_USB_CDC_MY_IPV4_ADDR if INVERTED_PENDULUM_USB_CDC_STATIC_IP
+
+    config NET_CONFIG_PEER_IPV4_ADDR
+        default INVERTED_PENDULUM_USB_CDC_PEER_IPV4_ADDR if INVERTED_PENDULUM_USB_CDC_STATIC_IP
+
+    config NET_CONFIG_MY_IPV4_NETMASK
+        default INVERTED_PENDULUM_USB_CDC_NETMASK if INVERTED_PENDULUM_USB_CDC_STATIC_IP
+
+    config SAMPLE_USBD_PRODUCT
+        default "Inverted Pendulum Tier2"
+
+    config SAMPLE_USBD_MANUFACTURER
+        default "Open Source Robotics Foundation"
+
+    config INVERTED_PENDULUM_USB_CDC_DHCPV4_SERVER
+        bool "Run DHCPv4 server on USB CDC interface"
+        default y
+        depends on INVERTED_PENDULUM_USB_CDC_STATIC_IP
+        select NET_DHCPV4_SERVER
+        select NET_UDP
+        help
+          Runs a lightweight DHCPv4 server leasing the peer IPv4 address to the
+          connected host PC, enabling true zero-configuration plug-and-play.
+
+    config NET_DHCPV4_SERVER_ADDR_COUNT
+        default 1 if INVERTED_PENDULUM_USB_CDC_DHCPV4_SERVER
+
+    config NET_DHCPV4_SERVER_ICMP_PROBE_TIMEOUT
+        default 0 if INVERTED_PENDULUM_USB_CDC_DHCPV4_SERVER
+
+    config NET_DHCPV4_SERVER_OPTION_ROUTER
+        default n if INVERTED_PENDULUM_USB_CDC_DHCPV4_SERVER
+
+endif # INVERTED_PENDULUM_COMM_USB_CDC
+
+config ZENBEDDED_ZENOH_IP_PORT
+    default "192.0.2.1:7447" if INVERTED_PENDULUM_COMM_USB_CDC
+    default "127.0.0.1:7447" if INVERTED_PENDULUM_COMM_WIFI
+
 endmenu
+
+if USB_DEVICE_STACK_NEXT
+source "samples/subsys/usb/common/Kconfig.sample_usbd"
+endif
 
 source "Kconfig.zephyr"
