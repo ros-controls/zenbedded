@@ -42,3 +42,19 @@ tests:
         - 'no:launch_ros'
         - '-k'
         - 'test_egress_message_is_received'
+
+  sample.zenbedded.zenoh_e2e.bidirectional:
+    platform_allow:
+      - native_sim/native/64
+    extra_configs:
+      - CONFIG_ZENOH_E2E_INGRESS=y
+      - CONFIG_ZENOH_E2E_EGRESS=y
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args:
+        - '-p'
+        - 'no:launch_testing'
+        - '-p'
+        - 'no:launch_ros'
+        - '-k'
+        - 'test_bidirectional_messages_are_exchanged'
