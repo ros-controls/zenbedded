@@ -1,0 +1,10 @@
+menuconfig ZENBEDDED
+	bool "Zenbedded Zephyr module"
+	default n
+	help
+	  Enable the Zenbedded transport and optional C++ client libraries.
+
+if ZENBEDDED
+	rsource "../zenbedded_transport/Kconfig"
+	rsource "../zenbedded_rcl/Kconfig"
+endif

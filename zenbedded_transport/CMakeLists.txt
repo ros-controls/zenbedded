@@ -1,25 +1,30 @@
 cmake_minimum_required(VERSION 3.20.0)
 
-zephyr_library()
-zephyr_include_directories(include)
+if(CONFIG_ZENBEDDED)
+  zephyr_library()
+  zephyr_include_directories(include)
 
-zephyr_library_sources(src/zenoh_transport.c)
-zephyr_library_compile_definitions(Z_CONFIG_SOCKET_TIMEOUT=1)
+  zephyr_library_sources(src/zenoh_transport.c)
+  zephyr_library_compile_definitions(Z_CONFIG_SOCKET_TIMEOUT=1)
 
-zephyr_compile_definitions(
-  Z_FEATURE_UNSTABLE_API=1
-  Z_TRANSPORT_LEASE=60000
-)
+  zephyr_compile_definitions(
+    Z_FEATURE_UNSTABLE_API=1
+    Z_TRANSPORT_LEASE=60000
+  )
 
-if(CONFIG_ZENBEDDED_TIER_1)
-  zephyr_library_sources(src/serialization.c)
-endif()
+  if(CONFIG_ZENBEDDED_TIER_1)
+    zephyr_library_sources(src/serialization.c)
+  endif()
 
 if(CONFIG_ZENBEDDED_TIER_2)
   set(GEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_tier2_payload.py")
 
   if(DEFINED CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH AND NOT "${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}" STREQUAL "")
-    set(SCHEMA_FILE "${APPLICATION_SOURCE_DIR}/${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}")
+    if(IS_ABSOLUTE "${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}")
+      set(SCHEMA_FILE "${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}")
+    else()
+      set(SCHEMA_FILE "${APPLICATION_SOURCE_DIR}/${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}")
+    endif()
   elseif(EXISTS "${APPLICATION_SOURCE_DIR}/config/interface_schema.yaml")
     set(SCHEMA_FILE "${APPLICATION_SOURCE_DIR}/config/interface_schema.yaml")
   elseif(EXISTS "${APPLICATION_SOURCE_DIR}/interface_schema.yaml")
@@ -46,7 +51,9 @@ if(CONFIG_ZENBEDDED_TIER_2)
     add_dependencies(zephyr_interface zenbedded_tier2_header_gen)
     zephyr_include_directories("${ZEPHYR_BINARY_DIR}/include")
   else()
-    message(FATAL_ERROR "[zenbedded] CONFIG_ZENBEDDED_TIER_2=y but schema YAML not found! "
-                          "Place 'interface_schema.yaml' in app root/config or set CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH.")
+    message(FATAL_ERROR "[zenbedded] CONFIG_ZENBEDDED_TIER_2=y but schema YAML not found at '${SCHEMA_FILE}'. "
+                "Set CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH to an application-relative or absolute path.")
   endif()
 endif()
+
+endif() # CONFIG_ZENBEDDED

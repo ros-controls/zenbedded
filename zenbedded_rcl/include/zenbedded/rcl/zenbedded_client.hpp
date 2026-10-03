@@ -19,7 +19,7 @@
 #include <stdint.h>
 #include <zephyr/kernel.h>
 
-#include "zenbedded_rcl/codecs.hpp"
+#include <zenbedded/rcl/codecs.hpp>
 #include "zenbedded_transport/zenoh_transport.h"
 
 class ZenbeddedClientBase

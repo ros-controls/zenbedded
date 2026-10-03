@@ -1,0 +1,29 @@
+sample:
+  name: Zenbedded external consumer
+common:
+  build_only: true
+  tags: zenbedded module
+tests:
+  sample.zenbedded.consumer.disabled:
+    platform_allow:
+      - native_sim/native/64
+      - esp32s3_devkitc/esp32s3/procpu
+  sample.zenbedded.consumer.c_transport:
+    platform_allow:
+      - native_sim/native/64
+      - esp32s3_devkitc/esp32s3/procpu
+    extra_configs:
+      - CONFIG_ZENBEDDED=y
+      - CONFIG_ZENBEDDED_TIER_1=y
+      - CONFIG_ZENBEDDED_RCL=n
+  sample.zenbedded.consumer.cpp_client:
+    platform_allow:
+      - native_sim/native/64
+      - esp32s3_devkitc/esp32s3/procpu
+    extra_configs:
+      - CONFIG_ZENBEDDED=y
+      - CONFIG_ZENBEDDED_TIER_2=y
+      - CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH="interface_schema.yaml"
+      - CONFIG_CPP=y
+      - CONFIG_STD_CPP17=y
+      - CONFIG_ZENBEDDED_RCL=y
