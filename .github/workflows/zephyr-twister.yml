@@ -1,42 +1,55 @@
 name: Zephyr Twister
 
 on:
-  workflow_dispatch:
   pull_request:
     paths: &zephyr_twister_paths
       - 'demos/**'
       - 'zenbedded_rcl/**'
       - 'zenbedded_transport/**'
+      - 'docker/**'
+      - 'requirements.txt'
+      - '.github/workflows/docker-build.yml'
       - '.github/workflows/zephyr-twister.yml'
   push:
     branches:
       - master
     paths: *zephyr_twister_paths
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to build and test
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads') }}
 
 jobs:
+  docker:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+
   twister:
+    needs: docker
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
     container:
-      image: ghcr.io/ros-controls/zephyr-zenoh-integration/zephyr-zenoh-dev:latest
+      image: ${{ needs.docker.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Sync west modules to this PR's manifest
-        shell: bash
-        run: |
-          cp zenbedded_transport/west.yml /zephyr_ws/manifest-repo/zenbedded_transport.yml
-          cp docker/image-west.yml        /zephyr_ws/manifest-repo/west.yml
-          cd /zephyr_ws && west update zenoh-pico
+        with:
+          ref: ${{ github.sha }}
 
       - name: Build Colcon Packages
         shell: bash
