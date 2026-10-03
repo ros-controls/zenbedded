@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "zenbedded_rcl/zenbedded_client.hpp"
+#include <zenbedded/rcl/zenbedded_client.hpp>
 #include <zenbedded_transport/zenoh_transport.h>
 #include <zephyr/logging/log.h>
 

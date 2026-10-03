@@ -1,14 +1,18 @@
 menu "Zenbedded RCL Configuration"
 
+if ZENBEDDED
+
     config ZENBEDDED_RCL
         bool "Enable Zenbedded RCL"
-        default y
+        default n
+        depends on CPP && STD_CPP_VERSION >= 201703
         help
           This option enables the Zenbedded Ros Client Library (RCL).
 
     config ZENBEDDED_RCL_THREAD_PRIORITY
         int "Zenbedded thread priority"
         default 1
+        depends on ZENBEDDED_RCL
         help
             Zephyr thread priority for the zenbedded thread.
             Lower number = higher priority.
@@ -17,6 +21,7 @@ menu "Zenbedded RCL Configuration"
         int "zenbedded thread stack size (bytes)"
         default 4096
         range 1024 16384
+        depends on ZENBEDDED_RCL
         help
             Stack size for the zenbedded thread.
 
@@ -24,6 +29,7 @@ menu "Zenbedded RCL Configuration"
         int "Maximum size of state message (for static allocation)"
         default 256
         range 32 2048
+        depends on ZENBEDDED_RCL
         help
             Sizes both state double-buffer slots and a temporary of the same
             size that zenoh_publish_state() places on the control thread's
@@ -33,6 +39,7 @@ menu "Zenbedded RCL Configuration"
         int "Maximum size of cmd message (for static allocation)"
         default 256
         range 32 2048
+        depends on ZENBEDDED_RCL
         help
             Sizes both command double-buffer slots and a temporary of the same
             size that read_command() places on the calling thread's stack.
@@ -40,12 +47,14 @@ menu "Zenbedded RCL Configuration"
     config ZENBEDDED_RCL_PUB_TOPIC
         string "Name of the topic for publishing"
         default "zenbedded/state"
+        depends on ZENBEDDED_RCL
 
     config ZENBEDDED_RCL_SUB_TOPIC
         string "name of the topic for subscribing"
         default "zenbedded/cmd"
+        depends on ZENBEDDED_RCL
 
-    if ZENBEDDED_TIER_1
+    if ZENBEDDED_RCL && ZENBEDDED_TIER_1
         choice ZENBEDDED_RCL_STATE_MSG_TYPE
             prompt "State (published) message type for tier 1"
             default ZENBEDDED_RCL_STATE_MSG_JOINT_STATE
@@ -98,5 +107,7 @@ menu "Zenbedded RCL Configuration"
             default "control_msgs::msg::dds_::JointCommand_" if ZENBEDDED_RCL_CMD_MSG_JOINT_COMMAND
 
     endif # ZENBEDDED_TIER_1
+
+endif # ZENBEDDED
 
 endmenu

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20.0)
 
 # Load the Transport Module
 get_filename_component(WORKSPACE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
-list(APPEND ZEPHYR_EXTRA_MODULES ${WORKSPACE_DIR}/zenbedded_transport)
+list(APPEND ZEPHYR_EXTRA_MODULES ${WORKSPACE_DIR})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zenbedded_tier2_test)
