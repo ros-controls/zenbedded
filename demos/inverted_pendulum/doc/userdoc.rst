@@ -62,6 +62,9 @@ Open a serial terminal/monitor on the board's serial port, and run:
 
     wifi cred add -s <SSID> -k 1 -p <PASSWORD>
 
+
+It is normal to see a FATAL EXCEPTION here.
+
 Then restart the MCU. Credentials are stored in flash, so you only need to do
 this once (or when your network changes).
 
