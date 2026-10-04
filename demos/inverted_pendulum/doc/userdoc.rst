@@ -24,7 +24,9 @@ On your PC:
 
 .. code-block:: bash
 
-    RUST_LOG=debug zenohd -l tcp/0.0.0.0:7447
+    export ZENOH_CONFIG_OVERRIDE='mode="peer";listen/endpoints=["tcp/0.0.0.0:7447"]'
+    export RUST_LOG=zenoh=debug
+    ros2 run rmw_zenoh_cpp rmw_zenohd
 
 Leave it running.
 
