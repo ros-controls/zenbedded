@@ -102,8 +102,7 @@ Then build with symlinks:
 
     cd ~/ros2_ws
     mkdir src && ln -s /zephyr_ws/demos/inverted_pendulum/inverted_pendulum_ros src/
-    colcon build --symlink-install \
-      --packages-select zenbedded_hardware_interface zenbedded_transport inverted_pendulum_ros
+    colcon build --symlink-install
     source install/setup.bash
 
 Run
