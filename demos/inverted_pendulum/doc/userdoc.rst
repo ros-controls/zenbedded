@@ -60,7 +60,7 @@ Open a serial terminal/monitor on the board's serial port, and run:
 
 .. code-block:: text
 
-    wifi cred add -s <SSID> -k 1 -p <PASSWORD>
+    wifi cred add -s "<SSID>" -k 1 -p <PASSWORD>
 
 
 It is normal to see a FATAL EXCEPTION here.
