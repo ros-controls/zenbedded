@@ -3,6 +3,7 @@ FROM ros:lyrical-ros-base
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG ZEPHYR_SDK_VERSION=1.0.1
+ARG RAYLIB_VERSION=5.5
 
 # Install system dependencies for both Zephyr and ROS 2
 RUN apt-get update && apt-get install -y \
@@ -13,6 +14,9 @@ RUN apt-get update && apt-get install -y \
     python3-dev python3-tk python3-wheel xz-utils file \
     make gcc libsdl2-dev libmagic1 git \
     libudev-dev libusb-1.0-0-dev pkg-config \
+    libasound2-dev libgl1-mesa-dev libglu1-mesa-dev \
+    libx11-dev libxcursor-dev libxinerama-dev libxi-dev \
+    libxrandr-dev libxxf86vm-dev libwayland-dev libxkbcommon-dev \
     ros-${ROS_DISTRO}-ros2-control \
     ros-${ROS_DISTRO}-ros2-controllers \
     ros-${ROS_DISTRO}-control-msgs \
@@ -20,6 +24,18 @@ RUN apt-get update && apt-get install -y \
     ros-${ROS_DISTRO}-rosidl-generator-c \
     ros-${ROS_DISTRO}-rosidl-generator-cpp \
     && rm -rf /var/lib/apt/lists/*
+
+# Build and install Raylib from raysan5 GitHub repository
+RUN git clone --depth 1 --branch ${RAYLIB_VERSION} https://github.com/raysan5/raylib.git /tmp/raylib && \
+    cmake -B /tmp/raylib/build -S /tmp/raylib \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DPLATFORM=Desktop \
+        -DBUILD_EXAMPLES=OFF && \
+    cmake --build /tmp/raylib/build -j$(nproc) && \
+    cmake --install /tmp/raylib/build && \
+    ldconfig && \
+    rm -rf /tmp/raylib
 
 # Install Python workspace dependencies
 RUN --mount=type=bind,source=requirements.txt,target=/tmp/requirements.txt \
