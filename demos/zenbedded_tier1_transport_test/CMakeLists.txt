@@ -6,7 +6,7 @@ list(APPEND ZEPHYR_EXTRA_MODULES ${WORKSPACE_DIR}/zenbedded_transport)
 list(APPEND ZEPHYR_EXTRA_MODULES ${WORKSPACE_DIR}/zenbedded_rcl)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(zenbedded_test_node)
+project(zenbedded_tier1_transport_test)
 
 zephyr_compile_definitions(Z_CONFIG_SOCKET_TIMEOUT=1)
 

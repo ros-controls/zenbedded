@@ -59,6 +59,8 @@ protected:
   double balance_angle_;
   double kp_;
   double kd_;
+  double k_motor_pos_;
+  double k_motor_vel_;
   double max_acceleration_;
 };
 
