@@ -9,19 +9,19 @@
 		led-strip = &led_strip;
 	};
 
-	a4988_driver: a4988-stepper-driver {
-		compatible = "adi,tmc2209";
-		en-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
-		micro-step-res = <16>;
-	};
+	// a4988_driver: a4988-stepper-driver {
+	// 	compatible = "adi,tmc2209";
+	// 	en-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+	// 	micro-step-res = <16>;
+	// };
 
-	a4988_ctrl: a4988-stepper-controller {
-		compatible = "zephyr,gpio-step-dir-stepper-ctrl";
-		step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
-		dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
-		stepper-driver = <&a4988_driver>;
-		counter = <&counter0>;
-	};
+	// a4988_ctrl: a4988-stepper-controller {
+	// 	compatible = "zephyr,gpio-step-dir-stepper-ctrl";
+	// 	step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+	// 	dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+	// 	stepper-driver = <&a4988_driver>;
+	// 	counter = <&counter0>;
+	// };
 
 	// Enable this and replace the alias for drivers like DRVxxx and TMC2209 so you can control microstepping
 
