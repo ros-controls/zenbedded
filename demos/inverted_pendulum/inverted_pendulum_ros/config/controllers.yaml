@@ -2,11 +2,13 @@ controller_manager:
   ros__parameters:
     update_rate: 100
 
-    inverted_pendulum_controller:
-      type: inverted_pendulum_controller/InvertedPendulumController
+joint_state_broadcaster:
+  ros__parameters:
+    type: joint_state_broadcaster/JointStateBroadcaster
 
 inverted_pendulum_controller:
   ros__parameters:
+    type: inverted_pendulum_controller/InvertedPendulumController
     # -------------------------------------------------------------------------
     # Hardware interface names
     # -------------------------------------------------------------------------
