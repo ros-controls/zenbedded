@@ -39,11 +39,9 @@ Environment variables set in the container:
 Volume mounts
 -------------
 
-- ``zenbedded_transport`` → ROS 2 workspace ``/ros2_ws/src/`` and Zephyr
-  workspace ``/zephyr_ws/``
+- ``zenbedded_transport`` → ROS 2 workspace ``/ros2_ws/src/``
 - ``zenbedded_hardware_interface`` → ROS 2 workspace ``/ros2_ws/src/``
-- ``zenbedded_rcl`` → Zephyr workspace ``/zephyr_ws/``
-- ``demos/`` → Zephyr workspace ``/zephyr_ws/``
+- Zenbedded repository → Zephyr workspace ``/zephyr_ws/zenbedded``
 
 Networking uses ``host`` mode and the container runs privileged
 (for USB-based flashing).

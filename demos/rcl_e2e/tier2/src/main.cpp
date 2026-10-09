@@ -6,8 +6,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
-#include "zenbedded_rcl/codecs.hpp"
-#include "zenbedded_rcl/zenbedded_client.hpp"
+#include <zenbedded/rcl/codecs.hpp>
+#include <zenbedded/rcl/zenbedded_client.hpp>
 #include "zenbedded_transport/generated/interface_data.h"
 
 int main()
