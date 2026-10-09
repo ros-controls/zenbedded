@@ -1,21 +1,170 @@
 <?xml version="1.0"?>
-<robot name="inverted_pendulum_demo">
-    <link name="base_link"/>
-    <link name="motor_joint_link"/>
-    <link name="pendulum_link"/>
+<!--
+    Rotary inverted pendulum (Furuta), authored in Onshape.
 
-    <joint name="motor_joint" type="continuous">
-        <parent link="base_link"/>
-        <child link="motor_joint_link"/>
-        <axis xyz="0 0 1"/>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
+    This file is the canonical description of the *pendulum* link's mass, COM
+    and inertia: `policy/pendulum_geometry.py` parses it at import time, and
+    the MuJoCo training env and the sysid friction derivation both build on
+    those constants. Change pendulum geometry in Onshape and re-export here;
+    nowhere else.
+
+    The `arm` link's <inertial> is CAD-derived too, but nothing reads it:
+    `pendulum_env.py` keeps its own hard-coded ARM_* constants, which disagree
+    with this link on mass, COM and reach alike. Reconciling them changes the
+    training plant, so it is deliberately out of scope here — see the "Where
+    physical parameters live" section of CLAUDE.md.
+
+    Visual geometry is the printable STL of each part, authored in millimetres
+    (hence scale="0.001 0.001 0.001"). One file per part, shared with the
+    documentation site's glTF export, so the URDF cannot drift onto a
+    different CAD revision from the geometry that gets printed. The
+    `package://zenbedded_inverted_pendulum/meshes/…` URIs resolve against this file's own directory —
+    `model/` holds the URDF and `model/meshes/` the STLs it names.
+
+    Frame conventions:
+    - Every mesh is authored with its bearing axis through the mesh origin, so
+      no <visual> translation is needed anywhere. What does differ is which
+      mesh axis that bearing runs along: the arm's is +z (the motor shaft),
+      the pendulum's is +y (its 8.1 mm pivot boss). The pendulum therefore
+      needs a <visual> rotation to bring its own axis onto the joint's, and
+      getting that wrong is invisible in a still frame — see the note on the
+      link below.
+    - The MuJoCo model in `pendulum_env.build_mjcf` describes the same rig but
+      does not carry base/lid geometry and puts the arm along +x at motor
+      angle zero, where base_to_arm's rpy puts it along base -y. Both zeros
+      are arbitrary — the stepper's zero is wherever the operator centres the
+      arm — but the two models are not interchangeable as a visual reference.
+-->
+<robot name="inverted_pendulum">
+
+    <material name="enclosure">
+        <color rgba="0. 0.6 0.6 1" />
+    </material>
+    <material name="arm_color">
+        <color rgba="0.25 0.25 0.28 1" />
+    </material>
+    <material name="pendulum_color">
+        <color rgba="0.25 0.25 0.28 1" />
+    </material>
+
+    <!-- Base (fixed to the world origin) -->
+    <link name="base">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://zenbedded_inverted_pendulum/meshes/base.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+            <material name="enclosure" />
+        </visual>
+    </link>
+
+    <!-- Lid (fixed on top of the base). Its origin is the seam where it meets
+         the base, so it mounts at the base mesh's top face. -->
+    <link name="lid">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://zenbedded_inverted_pendulum/meshes/lid.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+            <material name="enclosure" />
+        </visual>
+    </link>
+
+    <joint name="base_to_lid" type="fixed">
+        <parent link="base" />
+        <child link="lid" />
+        <origin xyz="0 0 0.070" rpy="0 0 0" />
     </joint>
 
+    <!-- Arm (actuated by stepper motor) -->
+    <link name="arm">
+        <inertial>
+            <origin
+                xyz="0.041 0 0.011"
+                rpy="0 0 0" />
+            <!-- <mass value="0.03477272" /> -->
+            <mass value="0.026" />
+            <inertia
+                ixx="0.00000429"
+                ixy="0"
+                ixz="-0.00000175"
+                iyy="0.00001756"
+                iyz="0"
+                izz="0.0000173" />
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://zenbedded_inverted_pendulum/meshes/arm.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+            <material name="arm_color" />
+        </visual>
+    </link>
+
+    <!-- Pendulum (swings freely on the arm).
+         Mass, COM, and inertia from Onshape CAD (custom PLA densities to
+         match measured 14 g pendulum mass at the printed infill %s; 2p
+         coin modelled; diametric magnet omitted, ~0.3 g near the pivot).
+         Cross-checked against sysid free-swing period: m·g·d/ω² gives
+         I_axis ≈ 4.48e-5 kg·m², matching m·d² + Lxx = 4.46e-5 within 1%.
+         Inertia tensor is about the COM with axes aligned to the link
+         frame; swing axis is x (matching the arm_to_pendulum joint).
+         The link frame is the pivot, so the COM is purely the 51 mm drop
+         along -z: the arm's reach belongs to arm_to_pendulum's origin, not
+         to this offset. Only sqrt(y² + z²) reaches the swing dynamics, so
+         `pendulum_geometry.PENDULUM_COM_M` is unaffected either way. -->
+    <link name="pendulum">
+        <inertial>
+            <origin
+                xyz="0 0 -0.051"
+                rpy="0 0 0" />
+            <mass value="0.014" />
+            <inertia
+                ixx="0.00000806"
+                ixy="0"
+                ixz="0"
+                iyy="0.00000855"
+                iyz="0.00000019"
+                izz="0.00000061" />
+        </inertial>
+        <visual>
+            <!-- The mesh is a flat plate in its own x-z plane, rod along +z,
+                 pivoting about an 8.1 mm boss whose axis runs along the mesh's
+                 *y* through mesh (x=0, z=0). The origin already sits on that
+                 axis, so no translation is needed — only a rotation taking
+                 mesh y onto this link's x (the hinge) and mesh z onto -z, so
+                 the rod hangs at joint angle zero. Yaw is -pi/2 rather than
+                 +pi/2 because the boss points inboard, toward the motor: its
+                 9.5 mm could not otherwise reach the arm's bearing pocket. -->
+            <origin xyz="0 0 0" rpy="3.14159265 0 -1.57079633" />
+            <geometry>
+                <mesh filename="package://zenbedded_inverted_pendulum/meshes/pendulum.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+            <material name="pendulum_color" />
+        </visual>
+    </link>
+
+    <!-- Revolute joint for arm (actuated by the stepper).
+         The limits are the lid-boss mechanical hard stops at +-135 deg, the
+         same ones `pendulum_env.MOTOR_LIMIT_RAD` enforces. Effort is the
+         motor's holding torque; velocity is the firmware's step-rate envelope
+         (200 kSteps/s at 6400 steps/rev), not the much lower rate any
+         controller actually commands. -->
+    <joint name="motor_joint" type="revolute">
+        <parent link="base" />
+        <child link="arm" />
+        <origin xyz="0 0 0.075" rpy="0 0 -1.57079" />
+        <axis xyz="0 0 1" />
+        <limit lower="-2.35619449" upper="2.35619449" effort="0.4" velocity="196" />
+    </joint>
+
+    <!-- Free-swinging pendulum pivot: one revolute DOF about the arm's own
+         +x (radial) axis, mounted at the arm's outboard bearing bore. -->
     <joint name="pendulum_joint" type="continuous">
-        <parent link="motor_joint_link"/>
-        <child link="pendulum_link"/>
-        <axis xyz="0 1 0"/>
-        <origin xyz="0.2 0 0" rpy="0 0 0"/>
+        <parent link="arm" />
+        <child link="pendulum" />
+        <origin xyz="0.062 0 0.014" rpy="3.14 0 0" />
+        <axis xyz="1 0 0" />
     </joint>
 
     <ros2_control name="ZenbeddedSystem" type="system">

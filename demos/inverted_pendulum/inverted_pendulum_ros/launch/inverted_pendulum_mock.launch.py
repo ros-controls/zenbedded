@@ -13,21 +13,41 @@
 # limitations under the License.
 
 import os
-import xacro
 from launch import LaunchDescription
-from launch.actions import RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
 from launch.event_handlers import OnProcessStart
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
+from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
     pkg_share = get_package_share_directory("zenbedded_inverted_pendulum")
 
-    robot_description_content = xacro.process_file(
-        os.path.join(pkg_share, "urdf", "inverted_pendulum_mock.urdf"),
-    ).toxml()
+    declare_visualize_arg = DeclareLaunchArgument(
+        "visualize",
+        default_value="true",
+        description="Launch the Raylib 3D visualizer window if built with Raylib",
+    )
+
+    robot_description_content = Command(
+        [
+            PathJoinSubstitution([FindExecutable(name="xacro")]),
+            " ",
+            PathJoinSubstitution(
+                [
+                    FindPackageShare("zenbedded_inverted_pendulum"),
+                    "urdf",
+                    "inverted_pendulum_mock.urdf",
+                ]
+            ),
+            " ",
+            "visualize:=",
+            LaunchConfiguration("visualize"),
+        ]
+    )
 
     robot_description = {
         "robot_description": ParameterValue(robot_description_content, value_type=str)
@@ -74,6 +94,7 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            declare_visualize_arg,
             robot_state_publisher_node,
             delay_ros2_control_after_rsp,
             delay_controller_after_ros2_control,

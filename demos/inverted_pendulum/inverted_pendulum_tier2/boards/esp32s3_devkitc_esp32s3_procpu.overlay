@@ -3,44 +3,44 @@
 
 / {
 	aliases {
-		stepper-driver = &a4988_driver;
-		stepper-ctrl = &a4988_ctrl;
+		stepper-driver = &tmc2209_driver;
+		stepper-ctrl = &tmc2209_ctrl;
 		encoder-driver = &as5600_encoder;
 		led-strip = &led_strip;
 	};
 
-	a4988_driver: a4988-stepper-driver {
-		compatible = "adi,tmc2209";
-		en-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
-		micro-step-res = <16>;
-	};
+	// a4988_driver: a4988-stepper-driver {
+	// 	compatible = "adi,tmc2209";
+	// 	en-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+	// 	micro-step-res = <16>;
+	// };
 
-	a4988_ctrl: a4988-stepper-controller {
-		compatible = "zephyr,gpio-step-dir-stepper-ctrl";
-		step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
-		dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
-		stepper-driver = <&a4988_driver>;
-		counter = <&counter0>;
-	};
+	// a4988_ctrl: a4988-stepper-controller {
+	// 	compatible = "zephyr,gpio-step-dir-stepper-ctrl";
+	// 	step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+	// 	dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+	// 	stepper-driver = <&a4988_driver>;
+	// 	counter = <&counter0>;
+	// };
 
 	// Enable this and replace the alias for drivers like DRVxxx and TMC2209 so you can control microstepping
 
-	//	tmc2209_driver: tmc2209-stepper-driver {
-	//		compatible = "adi,tmc2209";
-	//		en-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
-	//		m0-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
-	//		m1-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
-	//		micro-step-res = <32>;
-	//	};
-	//
-	//	tmc2209_ctrl: tmc2209-stepper-controller {
-	//		compatible = "zephyr,gpio-step-dir-stepper-ctrl";
-	//		step-gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
-	//		dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
-	//		invert-direction;
-	//		stepper-driver = <&tmc2209_driver>;
-	//      counter = <&counter0>;
-	//	};
+	tmc2209_driver: tmc2209-stepper-driver {
+		compatible = "adi,tmc2209";
+		en-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+		m0-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+		m1-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
+		micro-step-res = <32>;
+	};
+
+	tmc2209_ctrl: tmc2209-stepper-controller {
+		compatible = "zephyr,gpio-step-dir-stepper-ctrl";
+		step-gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
+		dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+		invert-direction;
+		stepper-driver = <&tmc2209_driver>;
+	    counter = <&counter0>;
+	};
 
 	cdc_ecm_eth0: cdc_ecm_eth0 {
 		compatible = "zephyr,cdc-ecm-ethernet";
