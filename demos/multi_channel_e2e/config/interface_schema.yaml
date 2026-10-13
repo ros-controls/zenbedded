@@ -1,0 +1,13 @@
+state_interfaces:
+  test_motor:
+    position: float64
+    velocity: float64
+  test_telemetry:
+    voltage: float32
+    temperature: float32
+command_interfaces:
+  test_motor:
+    effort: float64
+  test_mode:
+    mode_id: int32
+    flags: int32
