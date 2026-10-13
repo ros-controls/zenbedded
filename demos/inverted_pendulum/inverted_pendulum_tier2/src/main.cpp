@@ -46,8 +46,8 @@ extern "C"
 #include <zephyr/logging/log.h>
 #include <zephyr/net/net_if.h>
 #include <algorithm>
-#include <zenbedded_rcl/codecs.hpp>
-#include <zenbedded_rcl/zenbedded_client.hpp>
+#include <zenbedded/rcl/codecs.hpp>
+#include <zenbedded/rcl/zenbedded_client.hpp>
 
 LOG_MODULE_REGISTER(inverted_pendulum_tier2, LOG_LEVEL_INF);
 

@@ -1,5 +1,7 @@
 menu "Zenbedded Transport Configuration"
 
+if ZENBEDDED
+
 config ZENBEDDED_TRANSPORT_LOG_LEVEL
     int "Zenbedded Transport Log Level (0=OFF, 1=ERR, 2=WRN, 3=INF, 4=DBG)"
     default 2
@@ -140,27 +142,7 @@ config ZENBEDDED_TIER2_SCHEMA_PATH
 config NET_BUF_DATA_SIZE
     default 512 if ZENBEDDED_TIER_1
     default 256 if ZENBEDDED_TIER_2
-    default 256
 
-config NET_BUF_RX_COUNT
-    default 32
-
-config NET_BUF_TX_COUNT
-    default 32
-
-config NET_PKT_RX_COUNT
-    default 32
-
-config NET_PKT_TX_COUNT
-    default 32
-
-config HEAP_MEM_POOL_SIZE
-    default 65536
-
-config MAIN_STACK_SIZE
-    default 16384
-
-config SYSTEM_WORKQUEUE_STACK_SIZE
-    default 8192
+endif # ZENBEDDED
 
 endmenu

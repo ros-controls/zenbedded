@@ -19,7 +19,7 @@
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <cmath>
-#include <zenbedded_rcl/zenbedded_client.hpp>
+#include <zenbedded/rcl/zenbedded_client.hpp>
 
 LOG_MODULE_REGISTER(zenbedded_test_node, LOG_LEVEL_INF);
 

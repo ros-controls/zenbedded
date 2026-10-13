@@ -1,4 +1,0 @@
-name: zenbedded_rcl
-build:
-  cmake: .
-  kconfig: Kconfig

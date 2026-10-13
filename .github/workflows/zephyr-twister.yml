@@ -1,42 +1,73 @@
 name: Zephyr Twister
 
 on:
-  workflow_dispatch:
   pull_request:
     paths: &zephyr_twister_paths
       - 'demos/**'
       - 'zenbedded_rcl/**'
       - 'zenbedded_transport/**'
+      - 'zephyr/**'
+      - 'tests/**'
+      - 'compose.yaml'
+      - 'README.md'
+      - 'docker/**'
+      - 'requirements.txt'
+      - '.github/workflows/docker-build.yml'
       - '.github/workflows/zephyr-twister.yml'
   push:
     branches:
       - master
     paths: *zephyr_twister_paths
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to build and test
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads') }}
 
 jobs:
+  docker:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+
   twister:
+    needs: docker
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
     container:
-      image: ghcr.io/ros-controls/zephyr-zenoh-integration/zephyr-zenoh-dev:latest
+      image: ${{ needs.docker.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Sync west modules to this PR's manifest
+      - name: Build external Zephyr module consumer
         shell: bash
         run: |
-          cp zenbedded_transport/west.yml /zephyr_ws/manifest-repo/zenbedded_transport.yml
-          cp docker/image-west.yml        /zephyr_ws/manifest-repo/west.yml
-          cd /zephyr_ws && west update zenoh-pico
+          export ZEPHYR_BASE=/zephyr_ws/zephyr
+          export ZENBEDDED_MODULE_ROOT="$GITHUB_WORKSPACE"
+          cp -a "$GITHUB_WORKSPACE/tests/zephyr_module" "$RUNNER_TEMP/zenbedded-consumer"
+          "$ZEPHYR_BASE/scripts/twister" \
+            --testsuite-root "$RUNNER_TEMP/zenbedded-consumer" \
+            --platform native_sim/native/64 \
+            --platform esp32s3_devkitc/esp32s3/procpu \
+            --inline-logs \
+            --outdir external-consumer-twister-out \
+            --jobs 1
 
       - name: Build Colcon Packages
         shell: bash
@@ -47,18 +78,6 @@ jobs:
           rosdep update
           rosdep install --from-paths src --ignore-src -r -y
           colcon build
-
-      - name: Apply zenoh-pico patches
-        shell: bash
-        run: |
-          PICO_PATH="/zephyr_ws/modules/lib/zenoh-pico"
-          for patch in patches/*.patch; do
-            if git -C "$PICO_PATH" apply --reverse --check "$GITHUB_WORKSPACE/$patch" 2>/dev/null; then
-              echo "$patch already applied, skipping"
-            else
-              git -C "$PICO_PATH" apply "$GITHUB_WORKSPACE/$patch"
-            fi
-          done
 
       - name: Run twister (build + run native_sim)
         shell: bash

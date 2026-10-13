@@ -1,0 +1,6 @@
+state_interfaces:
+  test:
+    value: float32
+command_interfaces:
+  test:
+    value: float32

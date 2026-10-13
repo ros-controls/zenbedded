@@ -1,4 +1,0 @@
-name: zenbedded_transport
-build:
-  cmake: .
-  kconfig: Kconfig

@@ -10,9 +10,7 @@ services:
       - ./zenbedded_hardware_interface:/ros2_ws/src/zenbedded_hardware_interface
 
       # --- Zephyr RTOS Workspace (MCU Side) ---
-      - ./zenbedded_transport:/zephyr_ws/zenbedded_transport
-      - ./zenbedded_rcl:/zephyr_ws/zenbedded_rcl
-      - ./demos:/zephyr_ws/demos
+      - ./:/zephyr_ws/zenbedded
 
     stdin_open: true
     tty: true

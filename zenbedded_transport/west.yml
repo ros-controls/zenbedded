@@ -1,12 +1,13 @@
 # File: zephyr_zenoh_transport/west.yml
 manifest:
+
+  remotes:
+    - name: ros-controls
+      url-base: https://github.com/ros-controls
+
   projects:
     - name: zenoh-pico
-      url: https://github.com/eclipse-zenoh/zenoh-pico.git
-      # PR #1083 (refs/pull/1083/head) routes the Zephyr build through the templated config.h flow,
-      # fixing the Z_FEATURE_* "redefined" -Werror failures. Drop back to a
-      # tagged release once it lands upstream.
-      # Addon: dropping to v1.6.2 to avoid background executor issues on zephyr MCUs
-      # redefinition issues are fixed temporarily with #ifndef guards on config.h.in
-      revision: 1.6.2
+      remote: ros-controls
+      revision: zenbedded
       path: modules/lib/zenoh-pico
+      clone-depth: 1
