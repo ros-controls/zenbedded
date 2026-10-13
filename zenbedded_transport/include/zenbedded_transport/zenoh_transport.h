@@ -15,6 +15,12 @@ extern "C"
   /**
    * @brief Initializes the Zenbedded transport engine.
    *
+   * @details Thread-safe reference-counted initialization. The underlying Zenoh session
+   * is established on the first transition from 0 to 1 reference. Subsequent calls by
+   * other modules or threads increment the reference count and return immediately once
+   * the session is confirmed open. Every successful call to zenbedded_transport_init()
+   * must be balanced with a corresponding call to @ref zenbedded_transport_destroy().
+   *
    * @param domain_id ROS 2 Domain ID (Tier 1). Ignored in Tier 2.
    * @param node_name ROS 2 Node Name (Tier 1). Ignored in Tier 2.
    * @param mode "client" or "peer".
@@ -26,7 +32,13 @@ extern "C"
     uint32_t domain_id, const char * node_name, const char * mode, const char * locator);
 
   /**
-   * @brief Safely tears down the Zenoh session and un-declares Liveliness.
+   * @brief Decrements the transport reference count and tears down the session when 0.
+   *
+   * @details Decrements the internal session reference count. When the reference count
+   * reaches 0, all active publishers and subscribers are undeclared, liveliness tokens
+   * are revoked, and the underlying Zenoh session is closed. If invoked when the
+   * transport is uninitialized or when the reference count is already 0, a warning is
+   * logged and the call is safely ignored without undefined behavior.
    */
   void zenbedded_transport_destroy(void);
 
