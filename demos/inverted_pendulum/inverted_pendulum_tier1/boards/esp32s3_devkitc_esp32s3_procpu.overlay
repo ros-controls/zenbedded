@@ -25,7 +25,7 @@
 
 //	tmc2209_driver: tmc2209-stepper-driver {
 //		compatible = "adi,tmc2209";
-//		en-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+//		en-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
 //		m0-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
 //		m1-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
 //		micro-step-res = <32>;
