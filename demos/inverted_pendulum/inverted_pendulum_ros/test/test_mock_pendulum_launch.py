@@ -59,24 +59,15 @@ def generate_test_description():
             "inverted_pendulum_controller",
             "--param-file",
             controllers_yaml,
-            "--controller-manager-timeout",
-            "30",
         ],
         output="both",
-    )
-
-    delay_spawner_after_ros2_control = launch.actions.RegisterEventHandler(
-        event_handler=launch.event_handlers.OnProcessStart(
-            target_action=ros2_control_node,
-            on_start=[controller_spawner],
-        )
     )
 
     return launch.LaunchDescription(
         [
             robot_state_publisher,
             ros2_control_node,
-            delay_spawner_after_ros2_control,
+            controller_spawner,
             launch_testing.actions.ReadyToTest(),
         ]
     )
@@ -187,5 +178,5 @@ class TestShutdown(unittest.TestCase):
     def test_exit_codes(self, proc_info):
         launch_testing.asserts.assertExitCodes(
             proc_info,
-            allowable_exit_codes=(0, -2, 1),
+            allowable_exit_codes=(0, -2),
         )
