@@ -1,6 +1,6 @@
 :github_url: https://github.com/ros-controls/zenbedded/blob/{REPOS_FILE_BRANCH}/doc/getting_started.rst
 
-.. _zephyr_zenoh_getting_started:
+.. _zenbedded_getting_started:
 
 Getting Started
 ===============
@@ -21,10 +21,10 @@ Prerequisites
 
 .. code:: bash
 
-   mkdir -p ~/zephyr_zenoh_ws/src
-   cd ~/zephyr_zenoh_ws/src
+   mkdir -p ~/zenbedded_ws/src
+   cd ~/zenbedded_ws/src
    git clone git@github.com:ros-controls/zenbedded.git
-   cd ~/zephyr_zenoh_ws
+   cd ~/zenbedded_ws
    rosdep install --from-paths src --ignore-src -r -y
    colcon build
 
@@ -56,7 +56,7 @@ You can test it with the included test suite:
 
 .. code:: bash
 
-   source ~/zephyr_zenoh_ws/install/setup.bash
+   source ~/zenbedded_ws/install/setup.bash
    colcon test --packages-select zenbedded_hardware_interface
 
 For integration with a real MCU, the ``zenbedded_hardware_interface`` must be instantiated in a ``ros2_control`` URDF with the required parameters.

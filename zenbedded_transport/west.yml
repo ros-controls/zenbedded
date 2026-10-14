@@ -1,4 +1,4 @@
-# File: zephyr_zenoh_transport/west.yml
+# File: zenbedded_transport/west.yml
 manifest:
   projects:
     - name: zenoh-pico

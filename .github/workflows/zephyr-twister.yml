@@ -24,7 +24,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/ros-controls/zephyr-zenoh-integration/zephyr-zenoh-dev:latest
+      image: ghcr.io/ros-controls/zenbedded/zenbedded-dev:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

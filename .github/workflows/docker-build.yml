@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads') }}
 
 env:
-  IMAGE: ghcr.io/ros-controls/zephyr-zenoh-integration/zephyr-zenoh-dev
+  IMAGE: ghcr.io/ros-controls/zenbedded/zenbedded-dev
 
 jobs:
   build:

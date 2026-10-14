@@ -1,4 +1,4 @@
-# Zephyr Zenoh Integration for ros2_control
+# Zenbedded: Embedded ros2_control with Zephyr & Zenoh
 
 Better embedded integration for ROS 2 robots: bringing microcontrollers running [Zephyr RTOS](https://zephyrproject.org/) into `ros2_control` as first-class participants, with agent-less, low-latency communication over [Zenoh](https://zenoh.io/).
 

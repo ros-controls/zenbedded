@@ -16,10 +16,10 @@ Build the workspace from source with ``colcon``:
 
 .. code:: bash
 
-   mkdir -p ~/zephyr_zenoh_ws/src
-   cd ~/zephyr_zenoh_ws/src
-  git clone git@github.com:ros-controls/zenbedded.git
-   cd ~/zephyr_zenoh_ws
+   mkdir -p ~/zenbedded_ws/src
+   cd ~/zenbedded_ws/src
+   git clone git@github.com:ros-controls/zenbedded.git
+   cd ~/zenbedded_ws
    rosdep install --from-paths src --ignore-src -r -y
    colcon build
 
