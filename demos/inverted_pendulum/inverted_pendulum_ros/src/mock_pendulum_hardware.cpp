@@ -15,8 +15,10 @@
 #include "mock_pendulum_hardware/mock_pendulum_hardware.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
+#include <utility>
 
 #include "hardware_interface/introspection.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -140,8 +142,6 @@ CallbackReturn MockPendulumHardware::on_init(
   max_substeps_ = static_cast<int>(std::max(param("max_substeps", 4000.0), 1.0));
   max_cycle_dt_ = std::max(param("max_cycle_dt", 0.1), 1.0e-4);
 
-  visualize_ = param_bool("visualize", false);
-
   const double seed = param("seed", 0.0);
   if (seed > 0.0)
   {
@@ -156,6 +156,25 @@ CallbackReturn MockPendulumHardware::on_init(
   hw_states_.assign(4, 0.0);
   hw_commands_.assign(1, 0.0);
 
+  state_interfaces_.clear();
+  const std::array<std::pair<const char *, const char *>, 4> state_specs = {
+    std::make_pair("motor_joint", "position"),
+    std::make_pair("motor_joint", "velocity"),
+    std::make_pair("pendulum_joint", "position"),
+    std::make_pair("pendulum_joint", "velocity"),
+  };
+  for (const auto & [component, iface] : state_specs)
+  {
+    auto si = std::make_shared<hardware_interface::StateInterface>(component, iface);
+    std::ignore = si->set_value(0.0);
+    state_interfaces_.push_back(si);
+  }
+
+  command_interfaces_.clear();
+  auto ci = std::make_shared<hardware_interface::CommandInterface>("motor_joint", "acceleration");
+  std::ignore = ci->set_value(0.0);
+  command_interfaces_.push_back(ci);
+
   REGISTER_ROS2_CONTROL_INTROSPECTION("motor_joint/position", &hw_states_[0]);
   REGISTER_ROS2_CONTROL_INTROSPECTION("motor_joint/velocity", &hw_states_[1]);
   REGISTER_ROS2_CONTROL_INTROSPECTION("pendulum_joint/position", &hw_states_[2]);
@@ -165,20 +184,9 @@ CallbackReturn MockPendulumHardware::on_init(
   RCLCPP_INFO(
     logger(),
     "Furuta mock: L1=%.4f m, l2=%.4f m, m2=%.4f kg, J2_hinge=%.3e, stops=+-%.1f deg, "
-    "vmax=%.2f rad/s, sim_speed=%.2fx, viz=%s",
+    "vmax=%.2f rad/s, sim_speed=%.2fx",
     L1_, l2_nom_, m2_nom_, J2_com_nom_ + m2_nom_ * l2_nom_ * l2_nom_, motor_limit_ * 180.0 / kPi,
-    motor_max_vel_, sim_speed_, visualize_ ? "on" : "off");
-
-#ifndef MOCK_PENDULUM_WITH_RAYLIB
-  if (visualize_)
-  {
-    RCLCPP_WARN(
-      logger(),
-      "visualize:=true but the package was built without Raylib. Rebuild with "
-      "-DWITH_RAYLIB=ON to enable the window.");
-    visualize_ = false;
-  }
-#endif
+    motor_max_vel_, sim_speed_);
 
   return CallbackReturn::SUCCESS;
 }
@@ -187,21 +195,22 @@ CallbackReturn MockPendulumHardware::on_init(
 // Interfaces
 // ---------------------------------------------------------------------------
 
-std::vector<hardware_interface::StateInterface> MockPendulumHardware::export_state_interfaces()
+std::vector<hardware_interface::StateInterface::ConstSharedPtr>
+MockPendulumHardware::on_export_state_interfaces()
 {
-  std::vector<hardware_interface::StateInterface> interfaces;
-  interfaces.emplace_back("motor_joint", "position", &hw_states_[0]);
-  interfaces.emplace_back("motor_joint", "velocity", &hw_states_[1]);
-  interfaces.emplace_back("pendulum_joint", "position", &hw_states_[2]);
-  interfaces.emplace_back("pendulum_joint", "velocity", &hw_states_[3]);
-  return interfaces;
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr> out;
+  out.reserve(state_interfaces_.size());
+  for (const auto & si : state_interfaces_)
+  {
+    out.push_back(std::const_pointer_cast<const hardware_interface::StateInterface>(si));
+  }
+  return out;
 }
 
-std::vector<hardware_interface::CommandInterface> MockPendulumHardware::export_command_interfaces()
+std::vector<hardware_interface::CommandInterface::SharedPtr>
+MockPendulumHardware::on_export_command_interfaces()
 {
-  std::vector<hardware_interface::CommandInterface> interfaces;
-  interfaces.emplace_back("motor_joint", "acceleration", &hw_commands_[0]);
-  return interfaces;
+  return command_interfaces_;
 }
 
 CallbackReturn MockPendulumHardware::on_activate(const rclcpp_lifecycle::State & /*prev*/)
@@ -236,23 +245,8 @@ CallbackReturn MockPendulumHardware::on_activate(const rclcpp_lifecycle::State &
   have_prev_meas_ = false;
   q2_dot_filt_ = 0.0;
   hw_commands_[0] = 0.0;
+  std::ignore = command_interfaces_[0]->set_value(0.0);
   publish_states(1.0);
-
-#ifdef MOCK_PENDULUM_WITH_RAYLIB
-  if (visualize_)
-  {
-    PendulumVisualizer::Config cfg;
-    cfg.arm_length = param("viz_arm_length", 0.065);
-    cfg.rod_length = param("viz_rod_length", 0.052);
-    cfg.base_height = param("viz_base_height", 0.058);
-    cfg.arm_height = param("viz_arm_height", 0.072);
-    cfg.motor_limit = motor_limit_;
-    cfg.width = static_cast<int>(param("viz_width", 960.0));
-    cfg.height = static_cast<int>(param("viz_height", 720.0));
-    viz_ = std::make_unique<PendulumVisualizer>(cfg);
-    viz_->start();
-  }
-#endif
 
   RCLCPP_INFO(logger(), "Activated: pendulum starts at %.3f rad (0 = upright)", q2_);
   return CallbackReturn::SUCCESS;
@@ -260,13 +254,6 @@ CallbackReturn MockPendulumHardware::on_activate(const rclcpp_lifecycle::State &
 
 CallbackReturn MockPendulumHardware::on_deactivate(const rclcpp_lifecycle::State & /*prev*/)
 {
-#ifdef MOCK_PENDULUM_WITH_RAYLIB
-  if (viz_)
-  {
-    viz_->stop();
-    viz_.reset();
-  }
-#endif
   return CallbackReturn::SUCCESS;
 }
 
@@ -403,6 +390,11 @@ void MockPendulumHardware::publish_states(double dt_sim)
   hw_states_[1] = q1_dot_ + motor_vel_noise_ * normal_(rng_);
   hw_states_[2] = report_offset_ == 0.0 ? q2_meas : wrap_pi(q2_meas + report_offset_);
   hw_states_[3] = q2_dot_meas;
+
+  std::ignore = state_interfaces_[0]->set_value(hw_states_[0]);
+  std::ignore = state_interfaces_[1]->set_value(hw_states_[1]);
+  std::ignore = state_interfaces_[2]->set_value(hw_states_[2]);
+  std::ignore = state_interfaces_[3]->set_value(hw_states_[3]);
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +404,12 @@ void MockPendulumHardware::publish_states(double dt_sim)
 hardware_interface::return_type MockPendulumHardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
+  const auto cmd_opt = command_interfaces_[0]->get_optional<double>();
+  if (cmd_opt.has_value() && !std::isnan(*cmd_opt))
+  {
+    hw_commands_[0] = *cmd_opt;
+  }
+
   double dt_wall = period.seconds();
   if (!(dt_wall > 0.0))
   {
@@ -444,18 +442,6 @@ hardware_interface::return_type MockPendulumHardware::read(
       logger(), clock_, 1000,
       "Commanded acceleration exceeds %.2f N m holding torque: losing steps", motor_max_torque_);
   }
-
-#ifdef MOCK_PENDULUM_WITH_RAYLIB
-  if (viz_)
-  {
-    if (viz_->consume_disturbance())
-    {
-      q2_ = wrap_pi(q2_ + 0.65);
-      q2_dot_ += 5.0;
-    }
-    viz_->update(q1_, q2_, sim_time_, at_limit_ || step_loss_, sim_speed_);
-  }
-#endif
 
   return hardware_interface::return_type::OK;
 }
