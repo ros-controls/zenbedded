@@ -1,7 +1,5 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="inverted_pendulum_mock">
-    <xacro:arg name="visualize" default="false"/>
-
     <link name="base_link"/>
     <link name="motor_joint_link"/>
     <link name="pendulum_link"/>
@@ -60,10 +58,9 @@
             <param name="initial_q2_jitter">0.002</param>
             <param name="seed">0</param>
 
-            <!-- Timing and 3D visualization -->
+            <!-- Timing -->
             <param name="sim_speed_factor">1.0</param>
             <param name="max_substep">5.0e-4</param>
-            <param name="visualize">$(arg visualize)</param>
         </hardware>
         <joint name="motor_joint">
             <state_interface name="position"/>
