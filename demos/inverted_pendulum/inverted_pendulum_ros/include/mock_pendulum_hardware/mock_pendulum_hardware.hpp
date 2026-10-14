@@ -15,6 +15,7 @@
 #ifndef MOCK_PENDULUM_HARDWARE__MOCK_PENDULUM_HARDWARE_HPP_
 #define MOCK_PENDULUM_HARDWARE__MOCK_PENDULUM_HARDWARE_HPP_
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -51,9 +52,11 @@ public:
   CallbackReturn on_init(
     const hardware_interface::HardwareComponentInterfaceParams & params) override;
 
-  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr> on_export_state_interfaces()
+    override;
 
-  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> on_export_command_interfaces()
+    override;
 
   CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state) override;
 
@@ -70,6 +73,10 @@ private:
   std::vector<double> hw_states_;
   // Command: [motor/acceleration]
   std::vector<double> hw_commands_;
+
+  // Hardware interface handles (shared ownership, no raw pointers)
+  std::vector<hardware_interface::StateInterface::SharedPtr> state_interfaces_;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> command_interfaces_;
 
   // Dynamics state
   double q1_;      // motor joint angle (rad)

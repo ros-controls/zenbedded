@@ -74,18 +74,28 @@ CallbackReturn ZenbeddedHardware::on_init(
 
   hw_states_.resize(schema_.total_state_interfaces(), std::numeric_limits<double>::quiet_NaN());
   hw_commands_.resize(schema_.total_command_interfaces(), std::numeric_limits<double>::quiet_NaN());
-  state_buffer_.writeFromNonRT(std::vector<uint8_t>(schema_.state_buffer_size(), 0));
+  state_buffer_.set(std::vector<uint8_t>(schema_.state_buffer_size(), 0));
   command_buffer_.resize(schema_.command_buffer_size(), 0);
 
+  state_interfaces_.clear();
+  state_interfaces_.reserve(schema_.total_state_interfaces());
   for (size_t i = 0; i < schema_.total_state_interfaces(); i++)
   {
     const auto & f = schema_.state_fields()[i];
+    auto si = std::make_shared<hardware_interface::StateInterface>(f.component, f.field);
+    std::ignore = si->set_value(0.0);
+    state_interfaces_.push_back(si);
     REGISTER_ROS2_CONTROL_INTROSPECTION(f.component + "/" + f.field, &hw_states_[i]);
   }
 
+  command_interfaces_.clear();
+  command_interfaces_.reserve(schema_.total_command_interfaces());
   for (size_t i = 0; i < schema_.total_command_interfaces(); i++)
   {
     const auto & f = schema_.command_fields()[i];
+    auto ci = std::make_shared<hardware_interface::CommandInterface>(f.component, f.field);
+    std::ignore = ci->set_value(0.0);
+    command_interfaces_.push_back(ci);
     REGISTER_ROS2_CONTROL_INTROSPECTION(f.component + "/" + f.field, &hw_commands_[i]);
   }
 
@@ -93,26 +103,23 @@ CallbackReturn ZenbeddedHardware::on_init(
   return CallbackReturn::SUCCESS;
 }
 
-std::vector<hardware_interface::StateInterface> ZenbeddedHardware::export_state_interfaces()
+std::vector<hardware_interface::StateInterface::ConstSharedPtr>
+ZenbeddedHardware::on_export_state_interfaces()
 {
-  std::vector<hardware_interface::StateInterface> state_interfaces;
-  for (size_t i = 0; i < schema_.state_fields().size(); i++)
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr> state_interfaces;
+  state_interfaces.reserve(state_interfaces_.size());
+  for (const auto & si : state_interfaces_)
   {
-    const auto & f = schema_.state_fields()[i];
-    state_interfaces.emplace_back(f.component, f.field, &hw_states_[i]);
+    state_interfaces.push_back(
+      std::const_pointer_cast<const hardware_interface::StateInterface>(si));
   }
   return state_interfaces;
 }
 
-std::vector<hardware_interface::CommandInterface> ZenbeddedHardware::export_command_interfaces()
+std::vector<hardware_interface::CommandInterface::SharedPtr>
+ZenbeddedHardware::on_export_command_interfaces()
 {
-  std::vector<hardware_interface::CommandInterface> command_interfaces;
-  for (size_t i = 0; i < schema_.command_fields().size(); i++)
-  {
-    const auto & f = schema_.command_fields()[i];
-    command_interfaces.emplace_back(f.component, f.field, &hw_commands_[i]);
-  }
-  return command_interfaces;
+  return command_interfaces_;
 }
 
 CallbackReturn ZenbeddedHardware::on_activate(const rclcpp_lifecycle::State & /*previous_state*/)
@@ -138,26 +145,34 @@ CallbackReturn ZenbeddedHardware::on_activate(const rclcpp_lifecycle::State & /*
             schema_.state_buffer_size());
           return;
         }
-        state_buffer_.writeFromNonRT(std::move(bytes));
+        state_buffer_.set(std::move(bytes));
       },
       []() {}, zenoh::Session::SubscriberOptions::create_default(), nullptr));
 
     command_pub_ = std::make_unique<zenoh::Publisher>(session_->declare_publisher(
       zenoh::KeyExpr(command_topic_), zenoh::Session::PublisherOptions::create_default(), nullptr));
 
-    for (auto & state : hw_states_)
+    for (size_t i = 0; i < hw_states_.size(); i++)
     {
-      if (std::isnan(state))
+      if (std::isnan(hw_states_[i]))
       {
-        state = 0;
+        hw_states_[i] = 0;
+      }
+      if (i < state_interfaces_.size())
+      {
+        std::ignore = state_interfaces_[i]->set_value(hw_states_[i]);
       }
     }
 
-    for (auto & command : hw_commands_)
+    for (size_t i = 0; i < hw_commands_.size(); i++)
     {
-      if (std::isnan(command))
+      if (std::isnan(hw_commands_[i]))
       {
-        command = 0;
+        hw_commands_[i] = 0;
+      }
+      if (i < command_interfaces_.size())
+      {
+        std::ignore = command_interfaces_[i]->set_value(hw_commands_[i]);
       }
     }
   }
@@ -182,14 +197,21 @@ CallbackReturn ZenbeddedHardware::on_deactivate(const rclcpp_lifecycle::State & 
 hardware_interface::return_type ZenbeddedHardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  auto buf = state_buffer_.readFromRT();
-  if (buf && buf->size() == schema_.state_buffer_size())
-  {
-    for (size_t i = 0; i < schema_.total_state_interfaces(); i++)
+  state_buffer_.try_get(
+    [this](const std::vector<uint8_t> & buf)
     {
-      hw_states_[i] = schema_.read_state_field(buf->data(), i);
-    }
-  }
+      if (buf.size() == schema_.state_buffer_size())
+      {
+        for (size_t i = 0; i < schema_.total_state_interfaces(); i++)
+        {
+          hw_states_[i] = schema_.read_state_field(buf.data(), i);
+          if (i < state_interfaces_.size())
+          {
+            std::ignore = state_interfaces_[i]->set_value(hw_states_[i]);
+          }
+        }
+      }
+    });
   return hardware_interface::return_type::OK;
 }
 
@@ -203,6 +225,14 @@ hardware_interface::return_type ZenbeddedHardware::write(
 
   for (size_t i = 0; i < schema_.total_command_interfaces(); i++)
   {
+    if (i < command_interfaces_.size())
+    {
+      auto opt = command_interfaces_[i]->get_optional<double>();
+      if (opt.has_value() && !std::isnan(*opt))
+      {
+        hw_commands_[i] = *opt;
+      }
+    }
     schema_.write_command_field(command_buffer_.data(), i, hw_commands_[i]);
   }
   command_pub_->put(command_buffer_);

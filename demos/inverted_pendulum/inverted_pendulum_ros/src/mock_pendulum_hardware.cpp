@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <utility>
 
 #include "hardware_interface/hardware_info.hpp"
 #include "hardware_interface/system_interface.hpp"
@@ -54,24 +56,45 @@ CallbackReturn MockPendulumHardware::on_init(
   hw_states_.resize(4, 0.0);
   hw_commands_.resize(1, 0.0);
 
+  // Build interface handles — no raw pointers; values set via set_value() in read/write
+  state_interfaces_.clear();
+  const std::array<std::pair<const char *, const char *>, 4> state_specs = {
+    std::make_pair("motor_joint", "position"),
+    std::make_pair("motor_joint", "velocity"),
+    std::make_pair("pendulum_joint", "position"),
+    std::make_pair("pendulum_joint", "velocity"),
+  };
+  for (const auto & [component, iface] : state_specs)
+  {
+    auto si = std::make_shared<hardware_interface::StateInterface>(component, iface);
+    std::ignore = si->set_value(0.0);
+    state_interfaces_.push_back(si);
+  }
+
+  command_interfaces_.clear();
+  auto ci = std::make_shared<hardware_interface::CommandInterface>("motor_joint", "acceleration");
+  std::ignore = ci->set_value(0.0);
+  command_interfaces_.push_back(ci);
+
   return CallbackReturn::SUCCESS;
 }
 
-std::vector<hardware_interface::StateInterface> MockPendulumHardware::export_state_interfaces()
+std::vector<hardware_interface::StateInterface::ConstSharedPtr>
+MockPendulumHardware::on_export_state_interfaces()
 {
-  std::vector<hardware_interface::StateInterface> interfaces;
-  interfaces.emplace_back("motor_joint", "position", &hw_states_[0]);
-  interfaces.emplace_back("motor_joint", "velocity", &hw_states_[1]);
-  interfaces.emplace_back("pendulum_joint", "position", &hw_states_[2]);
-  interfaces.emplace_back("pendulum_joint", "velocity", &hw_states_[3]);
-  return interfaces;
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr> out;
+  out.reserve(state_interfaces_.size());
+  for (const auto & si : state_interfaces_)
+  {
+    out.push_back(std::const_pointer_cast<const hardware_interface::StateInterface>(si));
+  }
+  return out;
 }
 
-std::vector<hardware_interface::CommandInterface> MockPendulumHardware::export_command_interfaces()
+std::vector<hardware_interface::CommandInterface::SharedPtr>
+MockPendulumHardware::on_export_command_interfaces()
 {
-  std::vector<hardware_interface::CommandInterface> interfaces;
-  interfaces.emplace_back("motor_joint", "acceleration", &hw_commands_[0]);
-  return interfaces;
+  return command_interfaces_;
 }
 
 CallbackReturn MockPendulumHardware::on_activate(const rclcpp_lifecycle::State & /*previous_state*/)
@@ -80,12 +103,13 @@ CallbackReturn MockPendulumHardware::on_activate(const rclcpp_lifecycle::State &
   q1_dot_ = 0.0;
   q2_ = initial_q2_;
   q2_dot_ = 0.0;
-
-  hw_states_[0] = q1_;
-  hw_states_[1] = q1_dot_;
-  hw_states_[2] = q2_;
-  hw_states_[3] = q2_dot_;
   hw_commands_[0] = 0.0;
+
+  std::ignore = state_interfaces_[0]->set_value(q1_);
+  std::ignore = state_interfaces_[1]->set_value(q1_dot_);
+  std::ignore = state_interfaces_[2]->set_value(q2_);
+  std::ignore = state_interfaces_[3]->set_value(q2_dot_);
+  std::ignore = command_interfaces_[0]->set_value(0.0);
 
   return CallbackReturn::SUCCESS;
 }
@@ -106,6 +130,11 @@ hardware_interface::return_type MockPendulumHardware::read(
   }
 
   // Commanded acceleration applied directly to motor joint
+  const auto cmd_opt = command_interfaces_[0]->get_optional<double>();
+  if (cmd_opt.has_value() && !std::isnan(*cmd_opt))
+  {
+    hw_commands_[0] = *cmd_opt;
+  }
   const double q1_ddot_cmd = hw_commands_[0];
 
   // ---- Coupled 2-DOF Lagrangian dynamics ----
@@ -132,11 +161,11 @@ hardware_interface::return_type MockPendulumHardware::read(
   q2_dot_ += q2_ddot * dt;
   q2_ += q2_dot_ * dt;
 
-  // Publish all 4 state interfaces
-  hw_states_[0] = q1_;
-  hw_states_[1] = q1_dot_;
-  hw_states_[2] = q2_;
-  hw_states_[3] = q2_dot_;
+  // Publish all 4 state interfaces via handles
+  std::ignore = state_interfaces_[0]->set_value(q1_);
+  std::ignore = state_interfaces_[1]->set_value(q1_dot_);
+  std::ignore = state_interfaces_[2]->set_value(q2_);
+  std::ignore = state_interfaces_[3]->set_value(q2_dot_);
 
   return hardware_interface::return_type::OK;
 }
@@ -144,8 +173,8 @@ hardware_interface::return_type MockPendulumHardware::read(
 hardware_interface::return_type MockPendulumHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  // hw_commands_[0] holds the commanded motor acceleration set by the
-  // controller via the command interface. Consumed in read().
+  // The commanded acceleration is read from the command interface handle in read().
+  // Nothing to do here.
   return hardware_interface::return_type::OK;
 }
 
