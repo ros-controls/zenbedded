@@ -29,6 +29,7 @@ Guides and Examples
 
    Getting Started <getting_started.rst>
    Architecture <architecture.rst>
+   Firmware Architecture <rcl_architecture.rst>
    Demos <../demos/doc/userdoc.rst>
    Docker <../docker/doc/userdoc.rst>
    Benchmarking <benchmarking.rst>

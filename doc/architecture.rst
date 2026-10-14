@@ -63,4 +63,6 @@ zenbedded_rcl **[WIP]**
     thread) is implemented and ready for use. A ``HardwareComponent`` base
     class (lifecycle-managed sensor/actuator) and ``ComponentManager`` are
     planned but not yet implemented. Communicates directly with the host over
-    Zenoh without any intermediate agent.
+    Zenoh without any intermediate agent. See the detailed
+    :ref:`rcl_architecture` document for the full embedded ``ros2_control``
+    specification and multi-frequency execution models.

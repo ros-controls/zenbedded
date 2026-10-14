@@ -38,3 +38,12 @@ development environment mounts ``demos/`` into a ready-made workspace):
    cd demos/inverted_pendulum
    west build -p always -b esp32s3_devkitc/esp32s3/procpu #your appropriate board
    west flash --esp-device /dev/ttyUSB0
+
+
+Architecture & ros2_control Integration
+----------------------------------------
+
+For an in-depth design specification detailing how ``zenbedded_rcl`` integrates
+``HardwareComponent``, ``ControllerInterface``, ``ControllerManager``, Zephyr Devicetree
+(``zephyr dt``), and multi-rate execution scenarios, see the
+:ref:`rcl_architecture` guide.
