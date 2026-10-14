@@ -28,10 +28,6 @@
 #include "rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 
-#ifdef MOCK_PENDULUM_WITH_RAYLIB
-#include "mock_pendulum_hardware/pendulum_visualizer.hpp"
-#endif
-
 namespace mock_pendulum_hardware
 {
 
@@ -55,8 +51,10 @@ public:
   CallbackReturn on_init(
     const hardware_interface::HardwareComponentInterfaceParams & params) override;
 
-  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
-  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr> on_export_state_interfaces()
+    override;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> on_export_command_interfaces()
+    override;
 
   CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state) override;
   CallbackReturn on_deactivate(const rclcpp_lifecycle::State & previous_state) override;
@@ -149,15 +147,13 @@ private:
   std::vector<double> hw_states_;
   std::vector<double> hw_commands_;
 
+  std::vector<hardware_interface::StateInterface::SharedPtr> state_interfaces_;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> command_interfaces_;
+
   rclcpp::Clock clock_{RCL_STEADY_TIME};
 
   std::mt19937 rng_;
   std::normal_distribution<double> normal_{0.0, 1.0};
-
-#ifdef MOCK_PENDULUM_WITH_RAYLIB
-  std::unique_ptr<PendulumVisualizer> viz_;
-#endif
-  bool visualize_{false};
 };
 
 }  // namespace mock_pendulum_hardware

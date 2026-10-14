@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include <realtime_tools/realtime_buffer.hpp>
+#include <realtime_tools/realtime_thread_safe_box.hpp>
 #include <zenoh.hxx>
 #include "hardware_interface/handle.hpp"
 #include "hardware_interface/hardware_info.hpp"
@@ -45,9 +45,11 @@ public:
   CallbackReturn on_init(
     const hardware_interface::HardwareComponentInterfaceParams & params) override;
 
-  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr> on_export_state_interfaces()
+    override;
 
-  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> on_export_command_interfaces()
+    override;
 
   CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state) override;
 
@@ -64,8 +66,8 @@ private:
 
   InterfaceSchema schema_;
 
-  // Lock-free state buffer
-  realtime_tools::RealtimeBuffer<std::vector<uint8_t>> state_buffer_;
+  // Real-time safe state buffer
+  realtime_tools::RealtimeThreadSafeBox<std::vector<uint8_t>> state_buffer_;
   std::vector<uint8_t> command_buffer_;
 
   // Zenoh sub/pub
@@ -74,6 +76,8 @@ private:
 
   std::vector<double> hw_commands_;
   std::vector<double> hw_states_;
+  std::vector<hardware_interface::StateInterface::SharedPtr> state_interfaces_;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> command_interfaces_;
   std::string zenoh_endpoint_;
   std::string zenoh_mode_;
   std::string state_topic_;

@@ -98,19 +98,19 @@ TEST_F(TestZenbeddedHardware, missing_zenoh_params_fails)
 
 TEST_F(TestZenbeddedHardware, state_interfaces_exported)
 {
-  auto si = hw_->export_state_interfaces();
+  auto si = hw_->on_export_state_interfaces();
   EXPECT_EQ(si.size(), 2);
-  EXPECT_EQ(si[0].get_name(), "motor_arm/position");
-  EXPECT_EQ(si[0].get_interface_name(), "position");
-  EXPECT_EQ(si[1].get_name(), "pendulum_axis/position");
+  EXPECT_EQ(si[0]->get_name(), "motor_arm/position");
+  EXPECT_EQ(si[0]->get_interface_name(), "position");
+  EXPECT_EQ(si[1]->get_name(), "pendulum_axis/position");
 }
 
 TEST_F(TestZenbeddedHardware, command_interfaces_exported)
 {
-  auto ci = hw_->export_command_interfaces();
+  auto ci = hw_->on_export_command_interfaces();
   EXPECT_EQ(ci.size(), 1);
-  EXPECT_EQ(ci[0].get_name(), "motor_arm/position");
-  EXPECT_EQ(ci[0].get_interface_name(), "position");
+  EXPECT_EQ(ci[0]->get_name(), "motor_arm/position");
+  EXPECT_EQ(ci[0]->get_interface_name(), "position");
 }
 
 TEST_F(TestZenbeddedHardware, activate_succeeds_with_router)
@@ -165,10 +165,10 @@ TEST_F(TestZenbeddedHardware, read_state_updates_hw_states)
     EXPECT_EQ(
       hw_->read(rclcpp::Time(0), rclcpp::Duration(0, 0)), hardware_interface::return_type::OK);
 
-    auto si = hw_->export_state_interfaces();
+    auto si = hw_->on_export_state_interfaces();
     if (
       si.size() >= 2 &&
-      std::abs(static_cast<float>(si[0].get_optional().value_or(0)) - 3.14f) < 0.001f)
+      std::abs(static_cast<float>(si[0]->get_optional().value_or(0)) - 3.14f) < 0.001f)
     {
       received = true;
       break;
@@ -177,9 +177,9 @@ TEST_F(TestZenbeddedHardware, read_state_updates_hw_states)
 
   ASSERT_TRUE(received);
 
-  auto si = hw_->export_state_interfaces();
-  EXPECT_FLOAT_EQ(static_cast<float>(si[0].get_optional().value()), 3.14f);
-  EXPECT_FLOAT_EQ(static_cast<float>(si[1].get_optional().value()), 2.71f);
+  auto si = hw_->on_export_state_interfaces();
+  EXPECT_FLOAT_EQ(static_cast<float>(si[0]->get_optional().value()), 3.14f);
+  EXPECT_FLOAT_EQ(static_cast<float>(si[1]->get_optional().value()), 2.71f);
 
   EXPECT_EQ(hw_->on_deactivate(state), CallbackReturn::SUCCESS);
 }
@@ -196,9 +196,9 @@ TEST_F(TestZenbeddedHardware, write_publishes_command_via_zenoh)
     [&](zenoh::Sample & sample) { received = sample.get_payload().as_vector(); }, []() {},
     zenoh::Session::SubscriberOptions::create_default(), nullptr);
 
-  auto ci = hw_->export_command_interfaces();
+  auto ci = hw_->on_export_command_interfaces();
   ASSERT_GE(ci.size(), 1);
-  ASSERT_TRUE(ci[0].set_value(1.5));
+  ASSERT_TRUE(ci[0]->set_value(1.5));
 
   // Retry loop: write and check until data arrives or timeout
   bool published = false;
@@ -254,25 +254,25 @@ TEST_F(TestZenbeddedHardware, multi_instance_independent_schemas)
 
   // Verify each instance exports correct interfaces from its own schema
   {
-    auto si = hw_arm->export_state_interfaces();
+    auto si = hw_arm->on_export_state_interfaces();
     ASSERT_EQ(si.size(), 3);
-    EXPECT_EQ(si[0].get_name(), "shoulder/position");
-    EXPECT_EQ(si[1].get_name(), "shoulder/velocity");
-    EXPECT_EQ(si[2].get_name(), "elbow/position");
+    EXPECT_EQ(si[0]->get_name(), "shoulder/position");
+    EXPECT_EQ(si[1]->get_name(), "shoulder/velocity");
+    EXPECT_EQ(si[2]->get_name(), "elbow/position");
 
-    auto ci = hw_arm->export_command_interfaces();
+    auto ci = hw_arm->on_export_command_interfaces();
     ASSERT_EQ(ci.size(), 2);
-    EXPECT_EQ(ci[0].get_name(), "shoulder/position");
-    EXPECT_EQ(ci[1].get_name(), "elbow/position");
+    EXPECT_EQ(ci[0]->get_name(), "shoulder/position");
+    EXPECT_EQ(ci[1]->get_name(), "elbow/position");
   }
   {
-    auto si = hw_gripper->export_state_interfaces();
+    auto si = hw_gripper->on_export_state_interfaces();
     ASSERT_EQ(si.size(), 1);
-    EXPECT_EQ(si[0].get_name(), "gripper/position");
+    EXPECT_EQ(si[0]->get_name(), "gripper/position");
 
-    auto ci = hw_gripper->export_command_interfaces();
+    auto ci = hw_gripper->on_export_command_interfaces();
     ASSERT_EQ(ci.size(), 1);
-    EXPECT_EQ(ci[0].get_name(), "gripper/position");
+    EXPECT_EQ(ci[0]->get_name(), "gripper/position");
   }
 
   // Activate both — each creates its own Zenoh session, sub, pub
@@ -302,12 +302,12 @@ TEST_F(TestZenbeddedHardware, multi_instance_independent_schemas)
     hw_arm->read(rclcpp::Time(0), rclcpp::Duration(0, 0));
     hw_gripper->read(rclcpp::Time(0), rclcpp::Duration(0, 0));
 
-    auto arm_si = hw_arm->export_state_interfaces();
-    auto gripper_si = hw_gripper->export_state_interfaces();
+    auto arm_si = hw_arm->on_export_state_interfaces();
+    auto gripper_si = hw_gripper->on_export_state_interfaces();
     if (
       arm_si.size() >= 3 && gripper_si.size() >= 1 &&
-      std::abs(static_cast<float>(arm_si[0].get_optional().value_or(0)) - 1.0f) < 0.001f &&
-      std::abs(static_cast<float>(gripper_si[0].get_optional().value_or(0)) - 99.0f) < 0.001f)
+      std::abs(static_cast<float>(arm_si[0]->get_optional().value_or(0)) - 1.0f) < 0.001f &&
+      std::abs(static_cast<float>(gripper_si[0]->get_optional().value_or(0)) - 99.0f) < 0.001f)
     {
       state_received = true;
       break;
@@ -315,13 +315,13 @@ TEST_F(TestZenbeddedHardware, multi_instance_independent_schemas)
   }
   ASSERT_TRUE(state_received);
 
-  auto arm_si = hw_arm->export_state_interfaces();
-  EXPECT_FLOAT_EQ(static_cast<float>(arm_si[0].get_optional().value()), 1.0f);
-  EXPECT_FLOAT_EQ(static_cast<float>(arm_si[1].get_optional().value()), 2.0f);
-  EXPECT_FLOAT_EQ(static_cast<float>(arm_si[2].get_optional().value()), 3.0f);
+  auto arm_si = hw_arm->on_export_state_interfaces();
+  EXPECT_FLOAT_EQ(static_cast<float>(arm_si[0]->get_optional().value()), 1.0f);
+  EXPECT_FLOAT_EQ(static_cast<float>(arm_si[1]->get_optional().value()), 2.0f);
+  EXPECT_FLOAT_EQ(static_cast<float>(arm_si[2]->get_optional().value()), 3.0f);
 
-  auto gripper_si = hw_gripper->export_state_interfaces();
-  EXPECT_FLOAT_EQ(static_cast<float>(gripper_si[0].get_optional().value()), 99.0f);
+  auto gripper_si = hw_gripper->on_export_state_interfaces();
+  EXPECT_FLOAT_EQ(static_cast<float>(gripper_si[0]->get_optional().value()), 99.0f);
 
   // Verify command isolation — subscribe on both topics
   std::vector<uint8_t> arm_cmd_received, gripper_cmd_received;
@@ -335,10 +335,10 @@ TEST_F(TestZenbeddedHardware, multi_instance_independent_schemas)
     []() {}, zenoh::Session::SubscriberOptions::create_default(), nullptr);
 
   // Write on arm only — gripper subscriber must stay empty
-  auto arm_ci = hw_arm->export_command_interfaces();
+  auto arm_ci = hw_arm->on_export_command_interfaces();
   ASSERT_GE(arm_ci.size(), 2);
-  ASSERT_TRUE(arm_ci[0].set_value(10.0));
-  ASSERT_TRUE(arm_ci[1].set_value(20.0));
+  ASSERT_TRUE(arm_ci[0]->set_value(10.0));
+  ASSERT_TRUE(arm_ci[1]->set_value(20.0));
 
   bool cmd_published = false;
   for (int attempt = 0; attempt < 5; attempt++)
@@ -382,14 +382,14 @@ TEST_F(TestZenbeddedHardware, activate_initializes_all_command_interfaces)
   rclcpp_lifecycle::State state(1, "unconfigured");
   ASSERT_EQ(hw->on_activate(state), CallbackReturn::SUCCESS);
 
-  auto ci = hw->export_command_interfaces();
+  auto ci = hw->on_export_command_interfaces();
   ASSERT_EQ(ci.size(), 2u);
   for (const auto & c : ci)
   {
-    auto value = c.get_optional();
+    auto value = c->get_optional();
     ASSERT_TRUE(value.has_value());
-    EXPECT_FALSE(std::isnan(*value)) << c.get_name() << " left NaN by on_activate";
-    EXPECT_DOUBLE_EQ(*value, 0.0) << c.get_name();
+    EXPECT_FALSE(std::isnan(*value)) << c->get_name() << " left NaN by on_activate";
+    EXPECT_DOUBLE_EQ(*value, 0.0) << c->get_name();
   }
 
   EXPECT_EQ(hw->on_deactivate(state), CallbackReturn::SUCCESS);
@@ -414,8 +414,8 @@ TEST_F(TestZenbeddedHardware, undersized_state_payload_is_rejected)
     test_router_->put(zenoh::KeyExpr("joint_states"), good);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     hw_->read(rclcpp::Time(0), rclcpp::Duration(0, 0));
-    auto si = hw_->export_state_interfaces();
-    received = std::abs(si[0].get_optional().value_or(0) - 3.14) < 1e-9;
+    auto si = hw_->on_export_state_interfaces();
+    received = std::abs(si[0]->get_optional().value_or(0) - 3.14) < 1e-9;
   }
   ASSERT_TRUE(received);
 
@@ -427,10 +427,10 @@ TEST_F(TestZenbeddedHardware, undersized_state_payload_is_rejected)
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     EXPECT_EQ(
       hw_->read(rclcpp::Time(0), rclcpp::Duration(0, 0)), hardware_interface::return_type::OK);
-    auto si = hw_->export_state_interfaces();
-    ASSERT_DOUBLE_EQ(si[0].get_optional().value(), 3.14)
+    auto si = hw_->on_export_state_interfaces();
+    ASSERT_DOUBLE_EQ(si[0]->get_optional().value(), 3.14)
       << "undersized payload corrupted state on attempt " << attempt;
-    ASSERT_DOUBLE_EQ(si[1].get_optional().value(), 2.71)
+    ASSERT_DOUBLE_EQ(si[1]->get_optional().value(), 2.71)
       << "undersized payload corrupted state on attempt " << attempt;
   }
 
@@ -455,8 +455,8 @@ TEST_F(TestZenbeddedHardware, oversized_state_payload_is_rejected)
     test_router_->put(zenoh::KeyExpr("joint_states"), good);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     hw_->read(rclcpp::Time(0), rclcpp::Duration(0, 0));
-    auto si = hw_->export_state_interfaces();
-    received = std::abs(si[0].get_optional().value_or(0) - 3.14) < 1e-9;
+    auto si = hw_->on_export_state_interfaces();
+    received = std::abs(si[0]->get_optional().value_or(0) - 3.14) < 1e-9;
   }
   ASSERT_TRUE(received);
 
@@ -473,10 +473,10 @@ TEST_F(TestZenbeddedHardware, oversized_state_payload_is_rejected)
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     EXPECT_EQ(
       hw_->read(rclcpp::Time(0), rclcpp::Duration(0, 0)), hardware_interface::return_type::OK);
-    auto si = hw_->export_state_interfaces();
-    ASSERT_DOUBLE_EQ(si[0].get_optional().value(), 3.14)
+    auto si = hw_->on_export_state_interfaces();
+    ASSERT_DOUBLE_EQ(si[0]->get_optional().value(), 3.14)
       << "oversized payload corrupted state on attempt " << attempt;
-    ASSERT_DOUBLE_EQ(si[1].get_optional().value(), 2.71)
+    ASSERT_DOUBLE_EQ(si[1]->get_optional().value(), 2.71)
       << "oversized payload corrupted state on attempt " << attempt;
   }
 
