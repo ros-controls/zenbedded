@@ -110,22 +110,17 @@ void ZenbeddedClientBase::destroy()
 
 uint8_t * ZenbeddedClientBase::get_state_buffer_slot(size_t slot_idx)
 {
-  return state_buffer_[slot_idx];
+  return state_buffer_.slot(slot_idx);
 }
 
 uint8_t * ZenbeddedClientBase::prepare_state_write_slot(int & out_write_idx)
 {
-  out_write_idx = atomic_get(&state_buffer_active_idx_) ^ 1;
-  return state_buffer_[out_write_idx];
+  return state_buffer_.prepare_write(out_write_idx);
 }
 
 void ZenbeddedClientBase::commit_state_write_slot(int write_idx)
 {
-  // Ensure write completes before version increment
-  __atomic_thread_fence(__ATOMIC_RELEASE);
-
-  atomic_inc(&state_buffer_version_[write_idx]);
-  atomic_set(&state_buffer_active_idx_, write_idx);  // Flip active index
+  state_buffer_.commit_write(write_idx);
 }
 
 bool ZenbeddedClientBase::read_latest_command_raw(uint8_t * data, size_t size)
@@ -265,17 +260,9 @@ uint32_t ZenbeddedClientBase::accepted_command_count() const
 
 void ZenbeddedClientBase::reset_buffers()
 {
-  atomic_set(&state_buffer_active_idx_, 0);
-  atomic_set(&cmd_buffer_active_idx_, 0);
-
-  atomic_set(&state_buffer_version_[0], 0);
-  atomic_set(&state_buffer_version_[1], 0);
-  atomic_set(&cmd_buffer_version_[0], 0);
-  atomic_set(&cmd_buffer_version_[1], 0);
+  state_buffer_.reset();
+  cmd_buffer_.reset();
   atomic_set(&cmd_accepted_count_, 0);
-
-  memset(state_buffer_, 0, sizeof(state_buffer_));
-  memset(cmd_buffer_, 0, sizeof(cmd_buffer_));
 }
 
 void ZenbeddedClientBase::on_transport_cmd_cb(
@@ -294,57 +281,21 @@ void ZenbeddedClientBase::on_transport_cmd_cb(
 
 bool ZenbeddedClientBase::read_state_from_buffer(uint8_t * data, size_t size)
 {
-  const int read_idx = atomic_get(&state_buffer_active_idx_);
-  const atomic_val_t ver_before = atomic_get(&state_buffer_version_[read_idx]);
-  memcpy(data, state_buffer_[read_idx], size);
-
-  __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-  if (
-    atomic_get(&state_buffer_active_idx_) != read_idx ||
-    atomic_get(&state_buffer_version_[read_idx]) != ver_before)
-  {
-    return false;
-  }
-  return true;
+  return state_buffer_.read_latest(data, size);
 }
 
 void ZenbeddedClientBase::write_state_to_buffer(const uint8_t * data, size_t size)
 {
-  const int write_idx = atomic_get(&state_buffer_active_idx_) ^ 1;
-  memcpy(state_buffer_[write_idx], data, size);
-
-  __atomic_thread_fence(__ATOMIC_RELEASE);
-
-  atomic_inc(&state_buffer_version_[write_idx]);
-  atomic_set(&state_buffer_active_idx_, write_idx);
+  state_buffer_.write(data, size);
 }
 
 void ZenbeddedClientBase::write_command_to_buffer(const uint8_t * data, size_t size)
 {
-  const int write_idx = atomic_get(&cmd_buffer_active_idx_) ^ 1;
-  memcpy(cmd_buffer_[write_idx], data, size);
-
-  __atomic_thread_fence(__ATOMIC_RELEASE);
-
-  atomic_inc(&cmd_buffer_version_[write_idx]);
-  atomic_set(&cmd_buffer_active_idx_, write_idx);
+  cmd_buffer_.write(data, size);
   atomic_inc(&cmd_accepted_count_);
 }
 
 bool ZenbeddedClientBase::read_command_from_buffer(uint8_t * data, size_t size)
 {
-  const int read_idx = atomic_get(&cmd_buffer_active_idx_);
-  const atomic_val_t ver_before = atomic_get(&cmd_buffer_version_[read_idx]);
-  memcpy(data, cmd_buffer_[read_idx], size);
-
-  __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-  if (
-    atomic_get(&cmd_buffer_active_idx_) != read_idx ||
-    atomic_get(&cmd_buffer_version_[read_idx]) != ver_before)
-  {
-    return false;
-  }
-  return true;
+  return cmd_buffer_.read_latest(data, size);
 }
