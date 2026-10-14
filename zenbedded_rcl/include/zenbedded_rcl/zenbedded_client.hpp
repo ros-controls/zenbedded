@@ -20,6 +20,7 @@
 #include <zephyr/kernel.h>
 
 #include "zenbedded_rcl/codecs.hpp"
+#include "zenbedded_rcl/double_buffer.hpp"
 #include "zenbedded_transport/zenoh_transport.h"
 
 class ZenbeddedClientBase
@@ -80,13 +81,8 @@ private:
   zenbedded_pub_t pub_{};
   zenbedded_sub_t sub_{};
 
-  uint8_t state_buffer_[2][CONFIG_ZENBEDDED_MAX_STATE_BUFFER_SIZE]{};
-  atomic_t state_buffer_active_idx_{};
-  atomic_t state_buffer_version_[2]{};
-
-  uint8_t cmd_buffer_[2][CONFIG_ZENBEDDED_MAX_CMD_BUFFER_SIZE]{};
-  atomic_t cmd_buffer_active_idx_{};
-  atomic_t cmd_buffer_version_[2]{};
+  zenbedded::DoubleByteBuffer<CONFIG_ZENBEDDED_MAX_STATE_BUFFER_SIZE> state_buffer_;
+  zenbedded::DoubleByteBuffer<CONFIG_ZENBEDDED_MAX_CMD_BUFFER_SIZE> cmd_buffer_;
   atomic_t cmd_accepted_count_{};
 
   uint32_t control_freq_ = 0;
