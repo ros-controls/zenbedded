@@ -27,7 +27,7 @@
 
 	//	tmc2209_driver: tmc2209-stepper-driver {
 	//		compatible = "adi,tmc2209";
-	//		en-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+	//		en-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
 	//		m0-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
 	//		m1-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
 	//		micro-step-res = <32>;
@@ -41,6 +41,11 @@
 	//		stepper-driver = <&tmc2209_driver>;
 	//      counter = <&counter0>;
 	//	};
+
+	cdc_ecm_eth0: cdc_ecm_eth0 {
+		compatible = "zephyr,cdc-ecm-ethernet";
+		remote-mac-address = "00005E005301";
+	};
 };
 
 &i2s0_default {

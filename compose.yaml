@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: zephyr-zenoh-dev
+    container_name: zenbedded
     volumes:
       # --- ROS 2 Workspace (Ubuntu/Host Side) ---
       - ./zenbedded_transport:/ros2_ws/src/zenbedded_transport
