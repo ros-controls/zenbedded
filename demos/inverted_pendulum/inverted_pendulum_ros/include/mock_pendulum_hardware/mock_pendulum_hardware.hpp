@@ -16,6 +16,7 @@
 #define MOCK_PENDULUM_HARDWARE__MOCK_PENDULUM_HARDWARE_HPP_
 
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -26,10 +27,6 @@
 #include "rclcpp/macros.hpp"
 #include "rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp"
 #include "rclcpp_lifecycle/state.hpp"
-
-#ifdef MOCK_PENDULUM_WITH_RAYLIB
-#include "mock_pendulum_hardware/pendulum_visualizer.hpp"
-#endif
 
 namespace mock_pendulum_hardware
 {
@@ -56,7 +53,6 @@ public:
 
   std::vector<hardware_interface::StateInterface::ConstSharedPtr> on_export_state_interfaces()
     override;
-
   std::vector<hardware_interface::CommandInterface::SharedPtr> on_export_command_interfaces()
     override;
 
@@ -151,26 +147,13 @@ private:
   std::vector<double> hw_states_;
   std::vector<double> hw_commands_;
 
-  // Hardware interface handles (shared ownership, no raw pointers)
   std::vector<hardware_interface::StateInterface::SharedPtr> state_interfaces_;
   std::vector<hardware_interface::CommandInterface::SharedPtr> command_interfaces_;
 
-  // Dynamics state
-  double q1_;      // motor joint angle (rad)
-  double q1_dot_;  // motor joint velocity (rad/s)
-  double q2_;      // pendulum angle from upright (rad)
-  double q2_dot_;  // pendulum velocity (rad/s)
+  rclcpp::Clock clock_{RCL_STEADY_TIME};
 
-  // Physical parameters
-  double J1_;  // motor joint inertia (kg*m^2)
-  double J2_;  // pendulum inertia (kg*m^2)
-  double m2_;  // pendulum mass (kg)
-  double l2_;  // pendulum CoM distance (m)
-  double b1_;  // motor joint damping (N*m*s/rad)
-  double b2_;  // pendulum damping (N*m*s/rad)
-  double g_;   // gravity (m/s^2)
-
-  double initial_q2_;  // initial pendulum perturbation (rad)
+  std::mt19937 rng_;
+  std::normal_distribution<double> normal_{0.0, 1.0};
 };
 
 }  // namespace mock_pendulum_hardware

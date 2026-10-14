@@ -14,9 +14,9 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import RegisterEventHandler
 from launch.event_handlers import OnProcessStart
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import Command, FindExecutable, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -25,12 +25,6 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     pkg_share = get_package_share_directory("zenbedded_inverted_pendulum")
-
-    declare_visualize_arg = DeclareLaunchArgument(
-        "visualize",
-        default_value="true",
-        description="Launch the Raylib 3D visualizer window if built with Raylib",
-    )
 
     robot_description_content = Command(
         [
@@ -43,9 +37,6 @@ def generate_launch_description():
                     "inverted_pendulum_mock.urdf",
                 ]
             ),
-            " ",
-            "visualize:=",
-            LaunchConfiguration("visualize"),
         ]
     )
 
@@ -94,7 +85,6 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            declare_visualize_arg,
             robot_state_publisher_node,
             delay_ros2_control_after_rsp,
             delay_controller_after_ros2_control,
