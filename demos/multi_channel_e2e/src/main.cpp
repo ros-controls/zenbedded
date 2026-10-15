@@ -20,7 +20,7 @@
 #include "zenbedded_rcl/codecs.hpp"
 #include "zenbedded_rcl/node.hpp"
 #include "zenbedded_rcl/publisher.hpp"
-#include "zenbedded_rcl/subscription.hpp"
+#include "zenbedded_rcl/subscriber.hpp"
 
 #if defined(CONFIG_ARCH_POSIX)
 extern "C" void posix_exit(int exit_code);
@@ -100,9 +100,9 @@ int main()
   printk("[SYS] Created Tier 1 Publisher 2 on 'robot/gripper/joint_states'\n");
 
   // Declare 2 Tier 1 Subscribers
-  ZenbeddedSubscription<JointCommandCodec> arm_sub;
+  ZenbeddedSubscriber<JointCommandCodec> arm_sub;
   if (
-    node.create_subscription(
+    node.create_subscriber(
       arm_sub, "robot/arm/joint_cmd", on_arm_cmd_received, nullptr, arm_cmd_params) != 0)
   {
     printk("[FATAL] Failed to create arm_sub\n");
@@ -110,9 +110,9 @@ int main()
   }
   printk("[SYS] Created Tier 1 Subscription 1 on 'robot/arm/joint_cmd'\n");
 
-  ZenbeddedSubscription<JointCommandCodec> gripper_sub;
+  ZenbeddedSubscriber<JointCommandCodec> gripper_sub;
   if (
-    node.create_subscription(
+    node.create_subscriber(
       gripper_sub, "robot/gripper/joint_cmd", on_gripper_cmd_received, nullptr,
       gripper_cmd_params) != 0)
   {
@@ -251,16 +251,16 @@ int main()
   printk("[SYS] Created Publisher 2 on 'robot/telemetry'\n");
 
   // Create two distinct subscriptions with callbacks on different topics
-  ZenbeddedSubscription<RawCodec<MotorCommand> > motor_sub;
-  if (node.create_subscription(motor_sub, "robot/motor/cmd", on_motor_cmd_received, nullptr) != 0)
+  ZenbeddedSubscriber<RawCodec<MotorCommand> > motor_sub;
+  if (node.create_subscriber(motor_sub, "robot/motor/cmd", on_motor_cmd_received, nullptr) != 0)
   {
     printk("[FATAL] Failed to create motor_sub\n");
     return -1;
   }
   printk("[SYS] Created Subscription 1 on 'robot/motor/cmd'\n");
 
-  ZenbeddedSubscription<RawCodec<ModeCommand> > mode_sub;
-  if (node.create_subscription(mode_sub, "robot/mode/cmd", on_mode_cmd_received, nullptr) != 0)
+  ZenbeddedSubscriber<RawCodec<ModeCommand> > mode_sub;
+  if (node.create_subscriber(mode_sub, "robot/mode/cmd", on_mode_cmd_received, nullptr) != 0)
   {
     printk("[FATAL] Failed to create mode_sub\n");
     return -1;
