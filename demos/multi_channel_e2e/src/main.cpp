@@ -22,6 +22,10 @@
 #include "zenbedded_rcl/publisher.hpp"
 #include "zenbedded_rcl/subscription.hpp"
 
+#if defined(CONFIG_ARCH_POSIX)
+extern "C" void posix_exit(int exit_code);
+#endif
+
 #if defined(CONFIG_ZENBEDDED_TIER_1)
 
 static volatile uint32_t g_arm_cmd_calls = 0;
@@ -165,6 +169,9 @@ int main()
   node.destroy();
 
   printk("[PASS] Tier 1 Multi Pub/Sub test completed successfully!\n");
+#if defined(CONFIG_ARCH_POSIX)
+  posix_exit(0);
+#endif
   return 0;
 }
 
@@ -294,6 +301,9 @@ int main()
   node.destroy();
 
   printk("[PASS] Tier 2 Multi Pub/Sub test completed successfully!\n");
+#if defined(CONFIG_ARCH_POSIX)
+  posix_exit(0);
+#endif
   return 0;
 }
 
