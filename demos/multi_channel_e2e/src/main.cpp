@@ -108,7 +108,7 @@ int main()
     printk("[FATAL] Failed to create arm_sub\n");
     return -1;
   }
-  printk("[SYS] Created Tier 1 Subscription 1 on 'robot/arm/joint_cmd'\n");
+  printk("[SYS] Created Tier 1 Subscriber 1 on 'robot/arm/joint_cmd'\n");
 
   ZenbeddedSubscriber<JointCommandCodec> gripper_sub;
   if (
@@ -119,7 +119,7 @@ int main()
     printk("[FATAL] Failed to create gripper_sub\n");
     return -1;
   }
-  printk("[SYS] Created Tier 1 Subscription 2 on 'robot/gripper/joint_cmd'\n");
+  printk("[SYS] Created Tier 1 Subscriber 2 on 'robot/gripper/joint_cmd'\n");
 
   // Stream samples on both publishers
   double arm_pos[2] = {0.0, 0.0};
@@ -250,14 +250,14 @@ int main()
   }
   printk("[SYS] Created Publisher 2 on 'robot/telemetry'\n");
 
-  // Create two distinct subscriptions with callbacks on different topics
+  // Create two distinct subscribers with callbacks on different topics
   ZenbeddedSubscriber<RawCodec<MotorCommand> > motor_sub;
   if (node.create_subscriber(motor_sub, "robot/motor/cmd", on_motor_cmd_received, nullptr) != 0)
   {
     printk("[FATAL] Failed to create motor_sub\n");
     return -1;
   }
-  printk("[SYS] Created Subscription 1 on 'robot/motor/cmd'\n");
+  printk("[SYS] Created Subscriber 1 on 'robot/motor/cmd'\n");
 
   ZenbeddedSubscriber<RawCodec<ModeCommand> > mode_sub;
   if (node.create_subscriber(mode_sub, "robot/mode/cmd", on_mode_cmd_received, nullptr) != 0)
@@ -265,7 +265,7 @@ int main()
     printk("[FATAL] Failed to create mode_sub\n");
     return -1;
   }
-  printk("[SYS] Created Subscription 2 on 'robot/mode/cmd'\n");
+  printk("[SYS] Created Subscriber 2 on 'robot/mode/cmd'\n");
 
   // Publish periodic samples on both publishers
   MotorState st{0.0, 0.0};
