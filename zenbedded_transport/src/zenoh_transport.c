@@ -19,12 +19,12 @@ LOG_MODULE_REGISTER(zenoh_transport, LOG_LEVEL_INF);
 
 static z_owned_session_t z_session;
 static uint32_t current_domain_id = 0;
-static char current_node_name[64] = {0};
+static char current_node_name[CONFIG_ZENBEDDED_MAX_NODE_NAME_LEN] = {0};
 static bool is_initialized = false;
 
-#define MAX_PUBLISHERS 10
-#define MAX_SUBSCRIBERS 10
-#define KEYEXPR_MAX_LEN 512
+#define MAX_PUBLISHERS CONFIG_ZENBEDDED_MAX_PUBLISHERS
+#define MAX_SUBSCRIBERS CONFIG_ZENBEDDED_MAX_SUBSCRIBERS
+#define KEYEXPR_MAX_LEN CONFIG_ZENBEDDED_MAX_KEYEXPR_LEN
 #define RMW_GID_SIZE 16
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
@@ -82,7 +82,7 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
   size_t len = z_bytes_len(payload);
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
-  uint8_t rx_buf[1024];
+  uint8_t rx_buf[CONFIG_ZENBEDDED_TIER1_MAX_RX_BUFFER_SIZE];
   if (len == 0 || len > sizeof(rx_buf))
   {
     return;
@@ -93,21 +93,17 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
   sub->user_cb(rx_buf, len, sub->user_data);
 
 #elif defined(CONFIG_ZENBEDDED_TIER_2)
-#define T2_MAX_BUFFER_BOUND 64
-
-  if (len == 0 || len > T2_MAX_BUFFER_BOUND)
+  if (len == 0 || len > CONFIG_ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE)
   {
     return;
   }
 
-  uint8_t t2_rx_buf[T2_MAX_BUFFER_BOUND];
+  uint8_t t2_rx_buf[CONFIG_ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE];
 
   z_bytes_reader_t reader = z_bytes_get_reader(payload);
   z_bytes_reader_read(&reader, t2_rx_buf, len);
 
   sub->user_cb(t2_rx_buf, len, sub->user_data);
-
-#undef T2_MAX_BUFFER_BOUND
 #endif
 }
 
@@ -121,12 +117,13 @@ int zenbedded_transport_init(
 
   current_domain_id = domain_id;
   strncpy(current_node_name, node_name, sizeof(current_node_name) - 1);
+  current_node_name[sizeof(current_node_name) - 1] = '\0';
 
   z_owned_config_t z_config;
   z_config_default(&z_config);
   zp_config_insert(z_config_loan_mut(&z_config), Z_CONFIG_MODE_KEY, mode);
 
-  static char full_locator[128];
+  static char full_locator[CONFIG_ZENBEDDED_MAX_LOCATOR_LEN];
 
   if (locator && strlen(locator) > 0)
   {
@@ -310,7 +307,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
 #endif
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
-  char mangled_topic[64];
+  char mangled_topic[CONFIG_ZENBEDDED_MAX_TOPIC_NAME_LEN];
   mangle_topic(mangled_topic, sizeof(mangled_topic), clean_topic);
 
   pub->attachment.sequence_number = 0;
@@ -444,7 +441,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
 #endif
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
-  char mangled_topic[64];
+  char mangled_topic[CONFIG_ZENBEDDED_MAX_TOPIC_NAME_LEN];
   mangle_topic(mangled_topic, sizeof(mangled_topic), clean_topic);
 
   z_id_t zid = z_info_zid(z_session_loan(&z_session));
