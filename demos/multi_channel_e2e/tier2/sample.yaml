@@ -1,0 +1,18 @@
+sample:
+  name: Zenbedded Multi-Channel e2e tier2 test
+common:
+  tags: zenoh
+tests:
+  sample.zenbedded.multi_channel_e2e_tier2.build:
+    build_only: true
+    platform_allow:
+      - native_sim/native/64
+      - esp32s3_devkitc/esp32s3/procpu
+
+  sample.zenbedded.multi_channel_e2e_tier2.native_sim:
+    harness: pytest
+    platform_allow:
+      - native_sim/native/64
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args: ["-o", "env=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"]
