@@ -90,10 +90,6 @@ def _wait_until_router_ready(process, log_path):
 
 @pytest.fixture(scope="session")
 def zenoh_router(tmp_path_factory):
-    if _router_is_reachable(ROUTER_ENDPOINT):
-        yield None
-        return
-
     log_path = tmp_path_factory.mktemp("zenoh") / "rmw_zenohd.log"
 
     with log_path.open("w") as log:
@@ -166,5 +162,5 @@ class MultiChannelHostContext:
 
 
 @pytest.fixture
-def host_context():
+def host_context(zenoh_router):
     return MultiChannelHostContext

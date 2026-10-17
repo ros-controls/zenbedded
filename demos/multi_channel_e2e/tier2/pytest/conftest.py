@@ -84,10 +84,6 @@ def _wait_until_router_ready(process, log_path):
 
 @pytest.fixture(scope="session")
 def zenoh_router(tmp_path_factory):
-    if _router_is_reachable(ROUTER_ENDPOINT):
-        yield None
-        return
-
     log_path = tmp_path_factory.mktemp("zenoh") / "rmw_zenohd.log"
 
     with log_path.open("w") as log:
@@ -152,7 +148,7 @@ class ZenohMultiChannelClient:
 
 
 @pytest.fixture
-def zenoh_multi_channel_client():
+def zenoh_multi_channel_client(zenoh_router):
     conf = zenoh.Config()
     conf.insert_json5("mode", '"client"')
     conf.insert_json5("connect/endpoints", '["tcp/127.0.0.1:7447"]')
