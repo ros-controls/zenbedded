@@ -205,6 +205,10 @@ struct JointCommandCodec
 
   static bool read(const Ctx & ctx, const uint8_t * buf, size_t size, Value & out)
   {
+    if (!out.values && size >= ctx.offset_values)
+    {
+      out.values = const_cast<double *>(reinterpret_cast<const double *>(&buf[ctx.offset_values]));
+    }
     return zcdr_deserialize_joint_command(
       &ctx, buf, size, &out.stamp_sec, &out.stamp_nanosec, out.values);
   }

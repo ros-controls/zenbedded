@@ -48,6 +48,7 @@ public:
     if (ret == 0)
     {
       initialized_ = true;
+      k_msleep(20);  // Allow background read and lease tasks to settle
     }
     return ret;
   }
@@ -73,7 +74,18 @@ public:
     {
       return -ENODEV;
     }
-    return pub.init(topic_name, params);
+    int ret = -1;
+    for (int attempt = 0; attempt < 5; attempt++)
+    {
+      ret = pub.init(topic_name, params);
+      if (ret == 0)
+      {
+        k_msleep(10);  // Pace graph declarations
+        return 0;
+      }
+      k_msleep(50);
+    }
+    return ret;
   }
 
   template <typename Codec>
@@ -86,7 +98,18 @@ public:
     {
       return -ENODEV;
     }
-    return sub.init(topic_name, cb, user_data, params);
+    int ret = -1;
+    for (int attempt = 0; attempt < 5; attempt++)
+    {
+      ret = sub.init(topic_name, cb, user_data, params);
+      if (ret == 0)
+      {
+        k_msleep(10);  // Pace graph declarations
+        return 0;
+      }
+      k_msleep(50);
+    }
+    return ret;
   }
 
 private:
