@@ -34,7 +34,7 @@ class ZenbeddedClientBase
 {
 public:
   ZenbeddedClientBase();
-  virtual ~ZenbeddedClientBase();
+  ~ZenbeddedClientBase();
 
   /// @brief Deinitialize the client and underlying transport.
   void destroy();

@@ -30,7 +30,7 @@ class ZenbeddedPublisherBase
 public:
   ZenbeddedPublisherBase() { reset_buffer(); }
 
-  virtual ~ZenbeddedPublisherBase() { destroy(); }
+  ~ZenbeddedPublisherBase() { destroy(); }
 
   void destroy()
   {
@@ -210,6 +210,7 @@ public:
       return -ENODEV;
     }
     uint8_t tmp[CONFIG_ZENBEDDED_MAX_STATE_BUFFER_SIZE];
+    memcpy(tmp, get_buffer_slot(0), payload_size_);
     Codec::write(ctx_, val, tmp);
     return publish_raw(tmp, payload_size_);
   }

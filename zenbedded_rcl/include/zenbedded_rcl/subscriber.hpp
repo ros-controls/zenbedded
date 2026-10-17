@@ -28,9 +28,15 @@
 class ZenbeddedSubscriberBase
 {
 public:
-  ZenbeddedSubscriberBase() { reset_buffer(); }
+  using DispatchFn = void (*)(void * sub_obj, const uint8_t * payload, size_t size);
 
-  virtual ~ZenbeddedSubscriberBase() { destroy(); }
+  explicit ZenbeddedSubscriberBase(DispatchFn dispatch_fn = nullptr)
+  : dispatch_user_cb_fn_(dispatch_fn)
+  {
+    reset_buffer();
+  }
+
+  ~ZenbeddedSubscriberBase() { destroy(); }
 
   void destroy()
   {
@@ -77,12 +83,6 @@ protected:
     return 0;
   }
 
-  virtual void dispatch_user_cb(const uint8_t * payload, size_t size)
-  {
-    ARG_UNUSED(payload);
-    ARG_UNUSED(size);
-  }
-
   bool read_latest_raw(uint8_t * data, size_t size) { return buffer_.read_latest(data, size); }
 
   void reset_buffer()
@@ -94,6 +94,7 @@ protected:
   zenbedded_sub_t sub_handle_ = nullptr;
   bool initialized_ = false;
   size_t payload_size_ = 0;
+  DispatchFn dispatch_user_cb_fn_ = nullptr;
 
 private:
   zenbedded::DoubleByteBuffer<CONFIG_ZENBEDDED_MAX_CMD_BUFFER_SIZE> buffer_;
@@ -110,7 +111,10 @@ private:
     self->buffer_.write(payload, size);
     atomic_inc(&self->accepted_count_);
 
-    self->dispatch_user_cb(payload, size);
+    if (self->dispatch_user_cb_fn_)
+    {
+      self->dispatch_user_cb_fn_(self, payload, size);
+    }
   }
 };
 
@@ -122,7 +126,7 @@ public:
   using Value = typename Codec::Value;
   using CallbackFn = void (*)(const Value &, void * user_data);
 
-  ZenbeddedSubscriber()
+  ZenbeddedSubscriber() : ZenbeddedSubscriberBase(&ZenbeddedSubscriber::dispatch_thunk)
   {
     static_assert(CheckCodec<Codec>::is_valid_command_codec, "Invalid Codec Type for Subscriber!");
   }
@@ -161,21 +165,21 @@ public:
     return Codec::read(ctx_, tmp, payload_size_, out);
   }
 
-protected:
-  void dispatch_user_cb(const uint8_t * payload, size_t size) override
+private:
+  static void dispatch_thunk(void * sub_obj, const uint8_t * payload, size_t size)
   {
-    if (!cb_)
+    auto * self = static_cast<ZenbeddedSubscriber<Codec> *>(sub_obj);
+    if (!self || !self->cb_)
     {
       return;
     }
     Value val{};
-    if (Codec::read(ctx_, payload, size, val))
+    if (Codec::read(self->ctx_, payload, size, val))
     {
-      cb_(val, cb_user_data_);
+      self->cb_(val, self->cb_user_data_);
     }
   }
 
-private:
   typename Codec::Ctx ctx_{};
   CallbackFn cb_ = nullptr;
   void * cb_user_data_ = nullptr;
