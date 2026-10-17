@@ -20,7 +20,7 @@ LOG_MODULE_REGISTER(zenoh_transport, LOG_LEVEL_INF);
 static z_owned_session_t z_session;
 static uint32_t current_domain_id = 0;
 static char current_node_name[64] = {0};
-static bool is_initialized = false;
+static atomic_t transport_ref_count = ATOMIC_INIT(0);
 
 #define MAX_PUBLISHERS 10
 #define MAX_SUBSCRIBERS 10
@@ -114,8 +114,9 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
 int zenbedded_transport_init(
   uint32_t domain_id, const char * node_name, const char * mode, const char * locator)
 {
-  if (is_initialized)
+  if (atomic_inc(&transport_ref_count) > 0)
   {
+    LOG_DBG("Transport init ref count incremented: %d", (int)atomic_get(&transport_ref_count));
     return 0;
   }
 
@@ -150,6 +151,7 @@ int zenbedded_transport_init(
   if (z_open(&z_session, z_move(z_config), NULL) != Z_OK)
   {
     LOG_ERR("Failed to open Zenoh session!");
+    atomic_set(&transport_ref_count, 0);
     return -1;
   }
   LOG_INF("Zenoh session opened successfully");
@@ -181,15 +183,53 @@ int zenbedded_transport_init(
     z_session_loan(&z_session), &node_lv_token, z_view_keyexpr_loan(&ke), NULL);
 #endif
 
-  is_initialized = true;
   LOG_INF("Transport Initialized on Domain %u (Node: %s)", domain_id, current_node_name);
+  return 0;
+}
+
+int zenbedded_transport_undeclare_publisher(zenbedded_pub_t pub)
+{
+  if (!pub || !pub->in_use)
+  {
+    return -EINVAL;
+  }
+
+#if defined(CONFIG_ZENBEDDED_TIER_1)
+  z_liveliness_undeclare_token(z_move(pub->lv_token));
+#endif
+  z_undeclare_publisher(z_publisher_move(&pub->z_pub));
+  pub->in_use = false;
+  LOG_INF("Undeclared Publisher: %s", pub->topic_keyexpr);
+  return 0;
+}
+
+int zenbedded_transport_undeclare_subscriber(zenbedded_sub_t sub)
+{
+  if (!sub || !sub->in_use)
+  {
+    return -EINVAL;
+  }
+
+#if defined(CONFIG_ZENBEDDED_TIER_1)
+  z_liveliness_undeclare_token(z_move(sub->lv_token));
+#endif
+  z_undeclare_subscriber(z_subscriber_move(&sub->z_sub));
+  sub->in_use = false;
+  LOG_INF("Undeclared Subscriber: %s", sub->topic_keyexpr);
   return 0;
 }
 
 void zenbedded_transport_destroy(void)
 {
-  if (!is_initialized)
+  atomic_val_t prev = atomic_dec(&transport_ref_count);
+  if (prev <= 1)
   {
+    atomic_set(&transport_ref_count, 0);
+  }
+  else
+  {
+    LOG_DBG(
+      "Transport destroy: active references remaining (%d)", (int)atomic_get(&transport_ref_count));
     return;
   }
 
@@ -197,22 +237,14 @@ void zenbedded_transport_destroy(void)
   {
     if (pub_pool[i].in_use)
     {
-#if defined(CONFIG_ZENBEDDED_TIER_1)
-      z_liveliness_undeclare_token(z_move(pub_pool[i].lv_token));
-#endif
-      z_undeclare_publisher(z_publisher_move(&pub_pool[i].z_pub));
-      pub_pool[i].in_use = false;
+      zenbedded_transport_undeclare_publisher(&pub_pool[i]);
     }
   }
   for (int i = 0; i < MAX_SUBSCRIBERS; i++)
   {
     if (sub_pool[i].in_use)
     {
-#if defined(CONFIG_ZENBEDDED_TIER_1)
-      z_liveliness_undeclare_token(z_move(sub_pool[i].lv_token));
-#endif
-      z_undeclare_subscriber(z_subscriber_move(&sub_pool[i].z_sub));
-      sub_pool[i].in_use = false;
+      zenbedded_transport_undeclare_subscriber(&sub_pool[i]);
     }
   }
 
@@ -224,7 +256,6 @@ void zenbedded_transport_destroy(void)
   zp_stop_lease_task(z_session_loan_mut(&z_session));
 
   z_close(z_session_loan_mut(&z_session), NULL);
-  is_initialized = false;
   LOG_INF("Transport Destroyed Successfully");
 }
 
@@ -236,7 +267,7 @@ void zenbedded_transport_spin(void)
 zenbedded_pub_t zenbedded_transport_declare_publisher(
   const char * topic_name, const char * type_name)
 {
-  if (!is_initialized)
+  if (atomic_get(&transport_ref_count) <= 0)
   {
     return NULL;
   }
@@ -361,7 +392,7 @@ int zenbedded_transport_publish(zenbedded_pub_t pub, const uint8_t * payload, si
 zenbedded_sub_t zenbedded_transport_declare_subscriber(
   const char * topic_name, const char * type_name, zenbedded_recv_cb_t callback, void * user_data)
 {
-  if (!is_initialized)
+  if (atomic_get(&transport_ref_count) <= 0)
   {
     return NULL;
   }

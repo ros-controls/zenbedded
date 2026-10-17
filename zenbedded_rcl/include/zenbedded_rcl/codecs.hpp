@@ -104,6 +104,8 @@ struct RawCodec
   {
   };
 
+  static constexpr const char * ros2_msg_type = nullptr;
+
   using Value = T;
 
   static void init(Ctx &, const InitParams &, uint8_t *) {}
@@ -129,6 +131,7 @@ struct RawCodec
 struct JointStateCodec
 {
   using Ctx = zcdr_joint_state_ctx_t;
+  static constexpr const char * ros2_msg_type = "sensor_msgs::msg::dds_::JointState_";
 
   struct InitParams
   {
@@ -158,12 +161,20 @@ struct JointStateCodec
     zcdr_serialize_joint_state(
       &ctx, v.stamp_sec, v.stamp_nanosec, v.positions, v.velocities, v.efforts, buf);
   }
+
+  static bool read(const Ctx & ctx, const uint8_t * buf, size_t size, Value & out)
+  {
+    return zcdr_deserialize_joint_state(
+      &ctx, buf, size, &out.stamp_sec, &out.stamp_nanosec, const_cast<double *>(out.positions),
+      const_cast<double *>(out.velocities), const_cast<double *>(out.efforts));
+  }
 };
 
 // Codec for control_msgs/msg/JointCommand
 struct JointCommandCodec
 {
   using Ctx = zcdr_joint_command_ctx_t;
+  static constexpr const char * ros2_msg_type = "control_msgs::msg::dds_::JointCommand_";
 
   struct InitParams
   {
@@ -187,8 +198,17 @@ struct JointCommandCodec
 
   static size_t payload_size(const Ctx & ctx) { return ctx.payload_size; }
 
+  static void write(const Ctx & ctx, const Value & v, uint8_t * buf)
+  {
+    zcdr_serialize_joint_command(&ctx, v.stamp_sec, v.stamp_nanosec, v.values, buf);
+  }
+
   static bool read(const Ctx & ctx, const uint8_t * buf, size_t size, Value & out)
   {
+    if (!out.values && size >= ctx.offset_values)
+    {
+      out.values = const_cast<double *>(reinterpret_cast<const double *>(&buf[ctx.offset_values]));
+    }
     return zcdr_deserialize_joint_command(
       &ctx, buf, size, &out.stamp_sec, &out.stamp_nanosec, out.values);
   }
