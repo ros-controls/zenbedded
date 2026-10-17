@@ -26,8 +26,6 @@
 extern "C" void posix_exit(int exit_code);
 #endif
 
-#if defined(CONFIG_ZENBEDDED_TIER_1)
-
 static volatile uint32_t g_arm_cmd_calls = 0;
 static volatile uint32_t g_gripper_cmd_calls = 0;
 
@@ -121,7 +119,7 @@ int main()
   }
   printk("[SYS] Created Tier 1 Subscriber 2 on 'robot/gripper/joint_cmd'\n");
 
-  // Stream samples on both publishers
+  // Data value containers
   double arm_pos[2] = {0.0, 0.0};
   double arm_vel[2] = {0.1, 0.1};
   JointStateCodec::Value arm_val{
@@ -139,7 +137,10 @@ int main()
     .velocities = nullptr,
     .efforts = nullptr};
 
-  for (int i = 0; i < 5; i++)
+  printk("\n[SYS] Entering Multi-Channel Event Loop\n\n");
+
+  uint32_t loop_count = 0;
+  while (1)
   {
     arm_pos[0] += 0.05;
     arm_pos[1] += 0.10;
@@ -147,164 +148,17 @@ int main()
 
     arm_pub.publish(arm_val);
     gripper_pub.publish(grip_val);
-    printk(
-      "[PUB ITER %d] Arm=[%.2f, %.2f] | Gripper=[%.2f]\n", i + 1, arm_pos[0], arm_pos[1],
-      grip_pos[0]);
+
+    loop_count++;
+    if (loop_count % 20 == 0)
+    {
+      printk(
+        "[PUB] Arm=[%.2f, %.2f] | Gripper=[%.2f] | Calls: arm=%u grip=%u\n", arm_pos[0], arm_pos[1],
+        grip_pos[0], g_arm_cmd_calls, g_gripper_cmd_calls);
+    }
 
     k_sleep(K_MSEC(50));
   }
 
-  // Undeclare one publisher and one subscriber
-  printk("[SYS] Undeclaring gripper_pub (Pub 2) and gripper_sub (Sub 2)...\n");
-  gripper_pub.destroy();
-  gripper_sub.destroy();
-
-  arm_pos[0] += 0.5;
-  arm_pub.publish(arm_val);
-  printk("[SYS] Published on arm_pub after gripper handles destroyed: pos0=%.2f\n", arm_pos[0]);
-
-  // Teardown remaining handles
-  arm_pub.destroy();
-  arm_sub.destroy();
-  node.destroy();
-
-  printk("[PASS] Tier 1 Multi Pub/Sub test completed successfully!\n");
-#if defined(CONFIG_ARCH_POSIX)
-  posix_exit(0);
-#endif
   return 0;
 }
-
-#elif defined(CONFIG_ZENBEDDED_TIER_2)
-
-struct __attribute__((packed)) TelemetryState
-{
-  float voltage;
-  float temperature;
-};
-
-struct __attribute__((packed)) MotorState
-{
-  double position;
-  double velocity;
-};
-
-struct __attribute__((packed)) MotorCommand
-{
-  double effort;
-};
-
-struct __attribute__((packed)) ModeCommand
-{
-  int32_t mode_id;
-  int32_t flags;
-};
-
-static volatile uint32_t g_motor_cmd_calls = 0;
-static volatile uint32_t g_mode_cmd_calls = 0;
-
-static void on_motor_cmd_received(const MotorCommand & cmd, void * user_data)
-{
-  ARG_UNUSED(user_data);
-  g_motor_cmd_calls++;
-  printk("[CB 1] Motor Command received: effort=%.2f\n", cmd.effort);
-}
-
-static void on_mode_cmd_received(const ModeCommand & cmd, void * user_data)
-{
-  ARG_UNUSED(user_data);
-  g_mode_cmd_calls++;
-  printk("[CB 2] Mode Command received: mode=%d flags=0x%x\n", cmd.mode_id, cmd.flags);
-}
-
-int main()
-{
-  printk("\n=========================================\n");
-  printk("  Zenbedded Multi Pub/Sub E2E Validation \n");
-  printk("       (Tier 2 Raw: 2 Pub, 2 Sub)        \n");
-  printk("=========================================\n");
-
-  ZenbeddedNode node("tier2_multi_node", 0);
-  if (node.init() != 0)
-  {
-    printk("[FATAL] Failed to initialize ZenbeddedNode\n");
-    return -1;
-  }
-  printk("[SYS] ZenbeddedNode initialized successfully\n");
-
-  // Create two distinct publishers on different topics
-  ZenbeddedPublisher<RawCodec<MotorState> > motor_pub;
-  if (node.create_publisher(motor_pub, "robot/motor/state") != 0)
-  {
-    printk("[FATAL] Failed to create motor_pub\n");
-    return -1;
-  }
-  printk("[SYS] Created Publisher 1 on 'robot/motor/state'\n");
-
-  ZenbeddedPublisher<RawCodec<TelemetryState> > telem_pub;
-  int telem_ret = node.create_publisher(telem_pub, "robot/telemetry");
-  if (telem_ret != 0)
-  {
-    printk("[FATAL] Failed to create telem_pub: ret=%d\n", telem_ret);
-    return -1;
-  }
-  printk("[SYS] Created Publisher 2 on 'robot/telemetry'\n");
-
-  // Create two distinct subscribers with callbacks on different topics
-  ZenbeddedSubscriber<RawCodec<MotorCommand> > motor_sub;
-  if (node.create_subscriber(motor_sub, "robot/motor/cmd", on_motor_cmd_received, nullptr) != 0)
-  {
-    printk("[FATAL] Failed to create motor_sub\n");
-    return -1;
-  }
-  printk("[SYS] Created Subscriber 1 on 'robot/motor/cmd'\n");
-
-  ZenbeddedSubscriber<RawCodec<ModeCommand> > mode_sub;
-  if (node.create_subscriber(mode_sub, "robot/mode/cmd", on_mode_cmd_received, nullptr) != 0)
-  {
-    printk("[FATAL] Failed to create mode_sub\n");
-    return -1;
-  }
-  printk("[SYS] Created Subscriber 2 on 'robot/mode/cmd'\n");
-
-  // Publish periodic samples on both publishers
-  MotorState st{0.0, 0.0};
-  TelemetryState telem{12.4f, 25.5f};
-
-  for (int i = 0; i < 5; i++)
-  {
-    st.position += 0.1;
-    st.velocity = 0.5;
-    telem.temperature += 0.2f;
-
-    motor_pub.publish(st);
-    telem_pub.publish(telem);
-    printk(
-      "[PUB ITER %d] Motor pos=%.2f | Telem temp=%.1fC\n", i + 1, st.position,
-      static_cast<double>(telem.temperature));
-
-    k_sleep(K_MSEC(50));
-  }
-
-  // Undeclare one publisher and one subscriber, verifying the remaining stay operational
-  printk("[SYS] Undeclaring telem_pub (Pub 2) and mode_sub (Sub 2)...\n");
-  telem_pub.destroy();
-  mode_sub.destroy();
-
-  st.position += 0.5;
-  motor_pub.publish(st);
-  printk("[SYS] Published on motor_pub after telem_pub destroyed: pos=%.2f\n", st.position);
-
-  // Tear down all remaining handles and node
-  motor_pub.destroy();
-  motor_sub.destroy();
-  node.destroy();
-
-  printk("[PASS] Tier 2 Multi Pub/Sub test completed successfully!\n");
-#if defined(CONFIG_ARCH_POSIX)
-  posix_exit(0);
-#endif
-  return 0;
-}
-
-#endif

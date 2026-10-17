@@ -264,6 +264,22 @@ void zenbedded_transport_spin(void)
   // Deprecated: Network I/O handled autonomously by Zenoh-Pico background tasks
 }
 
+#if defined(CONFIG_ZENBEDDED_TIER_1)
+static void mangle_topic(char * dst, size_t dst_len, const char * src)
+{
+  if (src[0] == '/')
+  {
+    src++;
+  }
+  size_t i = 0;
+  for (; i < dst_len - 1 && src[i] != '\0'; i++)
+  {
+    dst[i] = (src[i] == '/') ? '%' : src[i];
+  }
+  dst[i] = '\0';
+}
+#endif
+
 zenbedded_pub_t zenbedded_transport_declare_publisher(
   const char * topic_name, const char * type_name)
 {
@@ -325,6 +341,9 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
 #endif
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
+  char mangled_topic[64];
+  mangle_topic(mangled_topic, sizeof(mangled_topic), clean_topic);
+
   pub->attachment.sequence_number = 0;
   pub->attachment.gid_length = RMW_GID_SIZE;
   sys_rand_get(pub->attachment.gid, RMW_GID_SIZE);
@@ -336,7 +355,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
     "%%%s/%s/%s/::,7:,:,:,,",
     current_domain_id, zid.id[0], zid.id[1], zid.id[2], zid.id[3], zid.id[4], zid.id[5], zid.id[6],
     zid.id[7], zid.id[8], zid.id[9], zid.id[10], zid.id[11], zid.id[12], zid.id[13], zid.id[14],
-    zid.id[15], current_node_name, clean_topic, type_name, type_hash);
+    zid.id[15], current_node_name, mangled_topic, type_name, type_hash);
 
   z_view_keyexpr_t lv_ke;
   z_view_keyexpr_from_str(&lv_ke, pub->lv_keyexpr);
@@ -456,6 +475,9 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
 #endif
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
+  char mangled_sub_topic[64];
+  mangle_topic(mangled_sub_topic, sizeof(mangled_sub_topic), clean_topic);
+
   z_id_t zid = z_info_zid(z_session_loan(&z_session));
   snprintf(
     sub->lv_keyexpr, KEYEXPR_MAX_LEN,
@@ -463,7 +485,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
     "%%%s/%s/%s/::,7:,:,:,,",
     current_domain_id, zid.id[0], zid.id[1], zid.id[2], zid.id[3], zid.id[4], zid.id[5], zid.id[6],
     zid.id[7], zid.id[8], zid.id[9], zid.id[10], zid.id[11], zid.id[12], zid.id[13], zid.id[14],
-    zid.id[15], current_node_name, clean_topic, type_name, type_hash);
+    zid.id[15], current_node_name, mangled_sub_topic, type_name, type_hash);
 
   z_view_keyexpr_t lv_ke;
   z_view_keyexpr_from_str(&lv_ke, sub->lv_keyexpr);
