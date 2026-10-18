@@ -3,7 +3,8 @@
     Rotary inverted pendulum (Furuta), copied from
     https://github.com/ferrolho/rotary-inverted-pendulum/blob/main/model/model.urdf
 -->
-<robot name="inverted_pendulum">
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="inverted_pendulum">
+    <xacro:arg name="use_mock_hardware" default="false" />
 
     <material name="enclosure">
         <color rgba="0. 0.6 0.6 1" />
@@ -104,14 +105,62 @@
     </joint>
 
     <ros2_control name="ZenbeddedSystem" type="system">
-        <hardware>
-            <plugin>zenbedded_hardware_interface/ZenbeddedHardware</plugin>
-            <param name="schema_path">$(find zenbedded_inverted_pendulum)/config/interface_schema.yaml</param>
-            <param name="zenoh_mode">client</param>
-            <param name="zenoh_endpoint">tcp/127.0.0.1:7447</param>
-            <param name="state_topic">zenbedded/inverted_pendulum/state</param>
-            <param name="command_topic">zenbedded/inverted_pendulum/cmd</param>
-        </hardware>
+        <xacro:unless value="$(arg use_mock_hardware)">
+            <hardware>
+                <plugin>zenbedded_hardware_interface/ZenbeddedHardware</plugin>
+                <param name="schema_path">$(find zenbedded_inverted_pendulum)/config/interface_schema.yaml</param>
+                <param name="zenoh_mode">client</param>
+                <param name="zenoh_endpoint">tcp/127.0.0.1:7447</param>
+                <param name="state_topic">zenbedded/inverted_pendulum/state</param>
+                <param name="command_topic">zenbedded/inverted_pendulum/cmd</param>
+            </hardware>
+        </xacro:unless>
+        <xacro:if value="$(arg use_mock_hardware)">
+            <hardware>
+                <plugin>mock_pendulum_hardware/MockPendulumHardware</plugin>
+
+                <!-- CAD-derived plant parameters -->
+                <param name="J1">6.10e-5</param>       <!-- arm inertia about motor axis [kg*m^2] -->
+                <param name="J2">4.447e-5</param>      <!-- pendulum inertia about hinge [kg*m^2] -->
+                <param name="m2">0.014</param>         <!-- pendulum mass [kg] -->
+                <param name="l2">0.051</param>         <!-- hinge to pendulum COM [m] -->
+                <param name="L1">0.062</param>         <!-- motor axis to hinge [m] -->
+                <param name="b1">1.0e-4</param>        <!-- arm viscous friction [N*m*s/rad] -->
+                <param name="b2">8.0e-6</param>        <!-- pendulum viscous friction [N*m*s/rad] -->
+                <param name="c2">2.0e-6</param>        <!-- pendulum Coulomb friction [N*m] -->
+                <param name="g">9.80665</param>
+
+                <!-- Actuator limits -->
+                <param name="motor_position_limit">2.35619449</param>  <!-- +-135 deg hard stops [rad] -->
+                <param name="motor_max_velocity">7.0</param>
+                <param name="motor_max_acceleration">200.0</param>
+                <param name="motor_max_torque">0.6</param>
+                <param name="model_step_loss">false</param>
+                <param name="hard_stop_restitution">0.0</param>
+
+                <!-- Sensor quantization and filtering -->
+                <param name="motor_steps_per_rev">3200</param>
+                <param name="encoder_counts_per_rev">4096</param>
+                <param name="encoder_noise">0.0002</param>
+                <param name="pendulum_velocity_from_encoder">false</param>
+                <param name="velocity_filter_alpha">0.95</param>
+                <param name="pendulum_report_offset">0.0</param>
+
+                <!-- Controlled physical randomness (subtle realism, not overboard) -->
+                <param name="pendulum_accel_noise">0.005</param>
+                <param name="motor_accel_noise">0.005</param>
+                <param name="param_randomization">0.005</param>
+                <!-- 0.1 rad (~5.7 deg) initial angle allows master's PD balance controller to stabilize -->
+                <param name="initial_q2">0.1</param>
+                <param name="initial_q2_jitter">0.002</param>
+                <param name="seed">0</param>
+
+                <!-- Timing -->
+                <param name="sim_speed_factor">1.0</param>
+                <param name="max_substep">5.0e-4</param>
+            </hardware>
+        </xacro:if>
+
         <joint name="motor_joint">
             <state_interface name="position"/>
             <state_interface name="velocity"/>
