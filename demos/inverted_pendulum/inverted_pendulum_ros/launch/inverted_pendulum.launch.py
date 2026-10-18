@@ -35,18 +35,23 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "robot_description": ParameterValue(Command(
-                            [
-                                "xacro",
-                                " ",
-                                PathSubstitution(FindPackageShare("zenbedded_inverted_pendulum"))
-                                / "urdf"
-                                / "inverted_pendulum.urdf.xacro",
-                                " ",
-                                "use_mock_hardware:=",
-                                LaunchConfiguration("use_mock_hardware"),
-                            ]
-                        ), value_type=str)
+                        "robot_description": ParameterValue(
+                            Command(
+                                [
+                                    "xacro",
+                                    " ",
+                                    PathSubstitution(
+                                        FindPackageShare("zenbedded_inverted_pendulum")
+                                    )
+                                    / "urdf"
+                                    / "inverted_pendulum.urdf.xacro",
+                                    " ",
+                                    "use_mock_hardware:=",
+                                    LaunchConfiguration("use_mock_hardware"),
+                                ]
+                            ),
+                            value_type=str,
+                        )
                     }
                 ],
             ),
