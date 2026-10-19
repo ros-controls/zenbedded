@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <esp_wifi.h>
 #include <zenbedded_transport/generated/interface_data.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/net_if.h>
-#include <zephyr/net/wifi_mgmt.h>
 #include <cmath>
+#include <zenbedded_demo_net.hpp>
 #include <zenbedded_rcl/zenbedded_client.hpp>
 
 LOG_MODULE_REGISTER(zenbedded_test_node, LOG_LEVEL_INF);
@@ -26,8 +25,7 @@ LOG_MODULE_REGISTER(zenbedded_test_node, LOG_LEVEL_INF);
 using TestClient = ZenbeddedClient<RawCodec<zenbedded_state_t>, RawCodec<zenbedded_command_t>>;
 
 constexpr uint32_t kControlFreqHz = 50;
-constexpr int kIterations = 200;            // ~4s at 50Hz
-constexpr int kWifiConnectTimeout = 15000;  // ms
+constexpr int kIterations = 200;  // ~4s at 50Hz
 
 static void report(bool pass, const char * msg)
 {
@@ -45,33 +43,12 @@ int main(void)
 {
   LOG_INF("starting test node");
 
-  LOG_INF("starting Sine Wave Zephyr App");
   net_if * iface = net_if_get_default();
-
-  LOG_INF("connecting to WiFi using stored credentials...");
-
-  uint32_t timer = k_uptime_get_32();
-  while (net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, nullptr, 0) != 0)
+  if (int net_err = zenbedded::demo::init_network(iface); net_err != 0)
   {
-    if (k_uptime_get_32() - timer > kWifiConnectTimeout)
-    {
-      LOG_ERR("Wifi Connection Timedout ...");
-      return -1;
-    }
-    LOG_DBG("WiFi connect-stored request failed... retrying...");
-    k_sleep(K_MSEC(500));
+    LOG_ERR("Failed to initialize network interface: %d", net_err);
+    return net_err;
   }
-
-  LOG_INF("Connected... Waiting for IPV4 address");
-  while (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) == nullptr)
-  {
-    k_sleep(K_MSEC(200));
-  }
-  LOG_INF("Got IPV4 address");
-
-  // Disable Wi-Fi power saving
-  esp_wifi_set_ps(WIFI_PS_NONE);
-  k_sleep(K_MSEC(200));
 
   static TestClient client;
 

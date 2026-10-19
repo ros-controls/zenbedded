@@ -1,0 +1,6 @@
+name: zenbedded_demo_common
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    dts_root: .

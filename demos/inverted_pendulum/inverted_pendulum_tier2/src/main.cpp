@@ -13,27 +13,6 @@
 // limitations under the License.
 
 #include <errno.h>
-#if defined(CONFIG_INVERTED_PENDULUM_COMM_WIFI)
-#include <esp_wifi.h>
-#include <zephyr/net/wifi_mgmt.h>
-#elif defined(CONFIG_INVERTED_PENDULUM_COMM_USB_CDC)
-#if defined(CONFIG_USB_DEVICE_STACK_NEXT)
-#include <zephyr/usb/usbd.h>
-extern "C"
-{
-#include <sample_usbd.h>
-}
-#endif
-#if defined(CONFIG_NET_CONFIG_SETTINGS)
-#include <zephyr/net/net_config.h>
-#endif
-#if defined(CONFIG_NET_DHCPV4)
-#include <zephyr/net/dhcpv4.h>
-#endif
-#if defined(CONFIG_NET_DHCPV4_SERVER)
-#include <zephyr/net/dhcpv4_server.h>
-#endif
-#endif
 #include <math.h>
 #include <zenbedded_transport/generated/interface_data.h>
 #include <zephyr/device.h>
@@ -46,13 +25,12 @@ extern "C"
 #include <zephyr/logging/log.h>
 #include <zephyr/net/net_if.h>
 #include <algorithm>
+#include <zenbedded_demo_net.hpp>
 #include <zenbedded_rcl/codecs.hpp>
 #include <zenbedded_rcl/zenbedded_client.hpp>
 
 LOG_MODULE_REGISTER(inverted_pendulum_tier2, LOG_LEVEL_INF);
 
-constexpr uint32_t kWifiConnectTimeout = 15000;  // ms
-constexpr uint32_t kIpv4AcquireTimeout = 30000;  // ms
 constexpr uint32_t kControlPeriodMs = 10;
 constexpr double kControlPeriodSec = kControlPeriodMs / 1000.0;
 constexpr uint32_t kCommandTimeoutMs = 200;
@@ -305,125 +283,6 @@ k_tid_t encoder_sample_thread_tid = k_thread_create(
   K_THREAD_STACK_SIZEOF(encoder_sample_thread_stack), encoder_sample_thread_entry, nullptr, nullptr,
   nullptr, CONFIG_ENCODER_SAMPLING_THREAD_PRIORITY, 0, K_FOREVER);
 
-#if defined(CONFIG_INVERTED_PENDULUM_COMM_WIFI)
-static int init_network(net_if * iface)
-{
-  LOG_INF("Connecting to WiFi using stored credentials...");
-  uint32_t timer = k_uptime_get_32();
-  while (net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, nullptr, 0) != 0)
-  {
-    if (k_uptime_get_32() - timer > kWifiConnectTimeout)
-    {
-      LOG_ERR("WiFi connection timed out");
-      return -ETIMEDOUT;
-    }
-    LOG_DBG("WiFi connect-stored request failed... retrying...");
-    k_sleep(K_MSEC(500));
-  }
-
-  LOG_INF("Waiting for IPv4 address...");
-  timer = k_uptime_get_32();
-  while (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) == nullptr)
-  {
-    if (k_uptime_get_32() - timer > kIpv4AcquireTimeout)
-    {
-      LOG_ERR("No IPv4 address acquired via WiFi");
-      return -ETIMEDOUT;
-    }
-    k_sleep(K_MSEC(200));
-  }
-
-  esp_wifi_set_ps(WIFI_PS_NONE);
-  LOG_INF("WiFi ready with IPv4 address");
-  return 0;
-}
-#elif defined(CONFIG_INVERTED_PENDULUM_COMM_USB_CDC)
-static int init_network(net_if * iface)
-{
-  LOG_INF("Initializing USB CDC network interface...");
-#if defined(CONFIG_USB_DEVICE_STACK_NEXT)
-  usbd_context * sample_usbd = sample_usbd_init_device(nullptr);
-  if (sample_usbd == nullptr)
-  {
-    LOG_ERR("Failed to initialize USB device context");
-    return -ENODEV;
-  }
-
-  int usb_err = usbd_enable(sample_usbd);
-  if (usb_err != 0)
-  {
-    LOG_ERR("Failed to enable USB device: %d", usb_err);
-    return usb_err;
-  }
-  LOG_INF("USB device initialized and enabled");
-
-#if defined(CONFIG_NET_CONFIG_SETTINGS)
-  (void)net_config_init_app(nullptr, "Initializing USB network");
-#elif defined(CONFIG_NET_DHCPV4)
-  net_dhcpv4_start(iface);
-#endif
-#endif /* CONFIG_USB_DEVICE_STACK_NEXT */
-
-  LOG_INF("Waiting for IPv4 address on USB CDC interface...");
-  uint32_t timer = k_uptime_get_32();
-  while (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) == nullptr)
-  {
-    if (k_uptime_get_32() - timer > kIpv4AcquireTimeout)
-    {
-      LOG_ERR("No IPv4 address on USB CDC interface within %u ms", kIpv4AcquireTimeout);
-      return -ETIMEDOUT;
-    }
-    k_sleep(K_MSEC(200));
-  }
-  LOG_INF("Got IPv4 address on USB CDC interface");
-
-#if defined(CONFIG_NET_DHCPV4_SERVER)
-  in_addr pool_addr;
-  if (net_addr_pton(AF_INET, CONFIG_INVERTED_PENDULUM_USB_CDC_PEER_IPV4_ADDR, &pool_addr) == 0)
-  {
-    int srv_err = net_dhcpv4_server_start(iface, &pool_addr);
-    if (srv_err != 0)
-    {
-      LOG_ERR("Failed to start DHCPv4 server: %d", srv_err);
-    }
-    else
-    {
-      LOG_INF(
-        "DHCPv4 server started leasing %s to host",
-        CONFIG_INVERTED_PENDULUM_USB_CDC_PEER_IPV4_ADDR);
-    }
-  }
-
-  LOG_INF("Waiting for host to acquire DHCP lease (or timeout)...");
-  uint32_t dhcp_timer = k_uptime_get_32();
-  while (k_uptime_get_32() - dhcp_timer < 5000)
-  {
-    bool lease_active = false;
-    net_dhcpv4_server_foreach_lease(
-      iface,
-      [](struct net_if *, struct dhcpv4_addr_slot * slot, void * user_data)
-      {
-        if (slot && slot->state == DHCPV4_SERVER_ADDR_ALLOCATED)
-        {
-          *static_cast<bool *>(user_data) = true;
-        }
-      },
-      &lease_active);
-    if (lease_active)
-    {
-      LOG_INF("Host acquired DHCP lease on USB CDC interface!");
-      break;
-    }
-    k_sleep(K_MSEC(250));
-  }
-#endif
-
-  return 0;
-}
-#else
-static int init_network(net_if *) { return 0; }
-#endif
-
 int main()
 {
   // Set LEDs to Blue for the Setup Phase
@@ -458,7 +317,7 @@ int main()
 
   LOG_INF("Starting Inverted Pendulum Tier2");
   net_if * iface = net_if_get_default();
-  if (int net_err = init_network(iface); net_err != 0)
+  if (int net_err = zenbedded::demo::init_network(iface); net_err != 0)
   {
     LOG_ERR("Failed to initialize network interface: %d", net_err);
     return net_err;

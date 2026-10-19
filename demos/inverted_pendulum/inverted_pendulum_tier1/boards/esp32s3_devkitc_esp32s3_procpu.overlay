@@ -1,4 +1,5 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <cdc_ecm_overlay.dtsi>
 
 / {
 	aliases {
@@ -39,11 +40,6 @@
 //		stepper-driver = <&tmc2209_driver>;
 //      counter = <&counter0>;
 //	};
-
-	cdc_ecm_eth0: cdc_ecm_eth0 {
-		compatible = "zephyr,cdc-ecm-ethernet";
-		remote-mac-address = "00005E005301";
-	};
 };
 
 
