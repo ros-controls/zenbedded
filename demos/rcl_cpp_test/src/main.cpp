@@ -58,8 +58,8 @@ int main(void)
       LOG_ERR("Wifi Connection Timedout ...");
       return -1;
     }
-    LOG_ERR("WiFi connect-stored request failed... retrying...");
-    k_sleep(K_MSEC(200));
+    LOG_DBG("WiFi connect-stored request failed... retrying...");
+    k_sleep(K_MSEC(500));
   }
 
   LOG_INF("Connected... Waiting for IPV4 address");

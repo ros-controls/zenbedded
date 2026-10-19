@@ -317,8 +317,8 @@ static int init_network(net_if * iface)
       LOG_ERR("WiFi connection timed out");
       return -ETIMEDOUT;
     }
-    LOG_ERR("WiFi connect-stored request failed... retrying...");
-    k_sleep(K_MSEC(200));
+    LOG_DBG("WiFi connect-stored request failed... retrying...");
+    k_sleep(K_MSEC(500));
   }
 
   LOG_INF("Waiting for IPv4 address...");
