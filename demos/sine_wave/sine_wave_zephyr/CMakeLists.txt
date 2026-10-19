@@ -16,6 +16,9 @@ project(sine_wave)
 target_sources(app PRIVATE src/main.cpp)
 target_compile_definitions(app PRIVATE _GNU_SOURCE _USE_MATH_DEFINES)
 
+if(CONFIG_USB_DEVICE_STACK_NEXT)
+  include(${ZEPHYR_BASE}/samples/subsys/usb/common/common.cmake)
+endif()
 
 target_include_directories(app PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../zenbedded_rcl/include
