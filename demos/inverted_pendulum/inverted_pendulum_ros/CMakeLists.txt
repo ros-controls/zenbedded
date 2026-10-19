@@ -42,7 +42,7 @@ install(TARGETS zenbedded_inverted_pendulum mock_pendulum_hardware
 )
 install(FILES inverted_pendulum_controller.xml mock_pendulum_hardware.xml
         DESTINATION share/${PROJECT_NAME})
-install(DIRECTORY urdf config launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY urdf config launch meshes DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
     find_package(ament_cmake_pytest REQUIRED)

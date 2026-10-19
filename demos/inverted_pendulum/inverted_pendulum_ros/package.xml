@@ -17,6 +17,7 @@
     <depend>robot_state_publisher</depend>
     <depend>controller_manager</depend>
     <depend>hardware_interface</depend>
+    <depend>joint_state_broadcaster</depend>
     <depend>controller_interface</depend>
     <depend>pluginlib</depend>
     <depend>xacro</depend>
