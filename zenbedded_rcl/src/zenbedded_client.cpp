@@ -73,6 +73,7 @@ int ZenbeddedClientBase::init_base(
   if (pub_ == nullptr)
   {
     LOG_ERR("Failed to declare publisher");
+    zenbedded_transport_destroy();
     return -EIO;
   }
   sub_ = zenbedded_transport_declare_subscriber(
@@ -80,6 +81,7 @@ int ZenbeddedClientBase::init_base(
   if (sub_ == nullptr)
   {
     LOG_ERR("Failed to declare subscriber");
+    zenbedded_transport_destroy();
     return -EIO;
   }
 
