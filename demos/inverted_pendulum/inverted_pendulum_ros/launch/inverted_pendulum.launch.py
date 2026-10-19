@@ -12,70 +12,66 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import xacro
 from launch import LaunchDescription
-from launch.actions import RegisterEventHandler
-from launch.event_handlers import OnProcessStart
+from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
+from launch.substitutions import Command, PathSubstitution, LaunchConfiguration
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    pkg_share = get_package_share_directory("zenbedded_inverted_pendulum")
-
-    robot_description_content = xacro.process_file(
-        os.path.join(pkg_share, "urdf", "inverted_pendulum.urdf"),
-    ).toxml()
-
-    robot_description = {
-        "robot_description": ParameterValue(robot_description_content, value_type=str)
-    }
-    controllers_yaml = os.path.join(pkg_share, "config", "controllers.yaml")
-
-    robot_state_publisher_node = Node(
-        package="robot_state_publisher",
-        executable="robot_state_publisher",
-        output="screen",
-        parameters=[robot_description],
-    )
-
-    ros2_control_node = Node(
-        package="controller_manager",
-        executable="ros2_control_node",
-        parameters=[controllers_yaml],
-        output="screen",
-    )
-
-    delay_ros2_control_after_rsp = RegisterEventHandler(
-        event_handler=OnProcessStart(
-            target_action=robot_state_publisher_node,
-            on_start=[ros2_control_node],
-        )
-    )
-
-    inverted_pendulum_controller_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=[
-            "inverted_pendulum_controller",
-            "--param-file",
-            controllers_yaml,
-        ],
-    )
-
-    delay_controller_after_ros2_control = RegisterEventHandler(
-        event_handler=OnProcessStart(
-            target_action=ros2_control_node,
-            on_start=[inverted_pendulum_controller_spawner],
-        )
-    )
 
     return LaunchDescription(
         [
-            robot_state_publisher_node,
-            delay_ros2_control_after_rsp,
-            delay_controller_after_ros2_control,
+            DeclareLaunchArgument(
+                "use_mock_hardware",
+                default_value="false",
+                description="Start robot with mock hardware mirroring command to its states.",
+            ),
+            Node(
+                package="robot_state_publisher",
+                executable="robot_state_publisher",
+                output="screen",
+                parameters=[
+                    {
+                        "robot_description": ParameterValue(
+                            Command(
+                                [
+                                    "xacro",
+                                    " ",
+                                    PathSubstitution(
+                                        FindPackageShare("zenbedded_inverted_pendulum")
+                                    )
+                                    / "urdf"
+                                    / "inverted_pendulum.urdf.xacro",
+                                    " ",
+                                    "use_mock_hardware:=",
+                                    LaunchConfiguration("use_mock_hardware"),
+                                ]
+                            ),
+                            value_type=str,
+                        )
+                    }
+                ],
+            ),
+            Node(
+                package="controller_manager",
+                executable="ros2_control_node",
+                parameters=[{"update_rate": 100}],
+                output="screen",
+            ),
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=[
+                    "inverted_pendulum_controller",
+                    "joint_state_broadcaster",
+                    "--param-file",
+                    PathSubstitution(FindPackageShare("zenbedded_inverted_pendulum"))
+                    / "config"
+                    / "controllers.yaml",
+                ],
+            ),
         ]
     )
