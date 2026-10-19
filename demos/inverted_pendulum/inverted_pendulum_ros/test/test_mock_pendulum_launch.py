@@ -16,68 +16,41 @@ import os
 import time
 import unittest
 
-import launch
-import launch_ros.actions
-import launch_testing
-import launch_testing.actions
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_testing.actions import ReadyToTest
+
 import launch_testing.markers
+import launch_testing
 import pytest
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from controller_manager_msgs.srv import ListControllers, ListHardwareInterfaces
 
+from controller_manager.test_utils import (
+    check_controllers_running,
+    check_if_js_published,
+    check_node_running,
+)
 
-@pytest.mark.launch_test
-@launch_testing.markers.keep_alive
+
+# Executes the given launch file and checks if all nodes can be started
+@pytest.mark.rostest
 def generate_test_description():
-    pkg_share = get_package_share_directory("zenbedded_inverted_pendulum")
 
-    urdf_path = os.path.join(pkg_share, "urdf", "inverted_pendulum_mock.urdf")
-    with open(urdf_path) as f:
-        urdf_content = f.read()
-
-    controllers_yaml = os.path.join(pkg_share, "config", "controllers.yaml")
-
-    robot_state_publisher = launch_ros.actions.Node(
-        package="robot_state_publisher",
-        executable="robot_state_publisher",
-        parameters=[{"robot_description": urdf_content}],
-        output="both",
-    )
-
-    ros2_control_node = launch_ros.actions.Node(
-        package="controller_manager",
-        executable="ros2_control_node",
-        parameters=[controllers_yaml],
-        output="both",
-    )
-
-    controller_spawner = launch_ros.actions.Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=[
-            "inverted_pendulum_controller",
-            "--param-file",
-            controllers_yaml,
-            "--controller-manager-timeout",
-            "30",
-        ],
-        output="both",
-    )
-
-    delay_spawner_after_ros2_control = launch.actions.RegisterEventHandler(
-        event_handler=launch.event_handlers.OnProcessStart(
-            target_action=ros2_control_node,
-            on_start=[controller_spawner],
-        )
-    )
-
-    return launch.LaunchDescription(
+    return LaunchDescription(
         [
-            robot_state_publisher,
-            ros2_control_node,
-            delay_spawner_after_ros2_control,
-            launch_testing.actions.ReadyToTest(),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory("zenbedded_inverted_pendulum"),
+                        "launch/inverted_pendulum.launch.py",
+                    )
+                ),
+                launch_arguments={"use_mock_hardware": "True"}.items(),
+            ),
+            ReadyToTest(),
         ]
     )
 
@@ -88,21 +61,16 @@ class TestMockPendulumHardware(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         rclpy.init()
-        cls.node = rclpy.create_node("test_mock_pendulum")
 
     @classmethod
     def tearDownClass(cls):
-        cls.node.destroy_node()
         rclpy.shutdown()
 
-    def _wait_for_node(self, node_name, timeout=10.0):
-        """Wait for a node to appear in the graph."""
-        start = time.time()
-        while time.time() - start < timeout:
-            if node_name in self.node.get_node_names():
-                return True
-            time.sleep(0.1)
-        return False
+    def setUp(self):
+        self.node = rclpy.create_node("test_mock_pendulum")
+
+    def tearDown(self):
+        self.node.destroy_node()
 
     def _call_list_controllers(self, timeout=5.0):
         """Call /controller_manager/list_controllers and return the response."""
@@ -144,19 +112,34 @@ class TestMockPendulumHardware(unittest.TestCase):
         names = [c.name for c in result.controller] if result else []
         return None, names
 
-    def test_controller_manager_starts(self):
-        """controller_manager node should be running."""
-        self.assertTrue(
-            self._wait_for_node("controller_manager"),
-            "controller_manager node not found",
+    def test_node_start(self):
+        check_node_running(self.node, "robot_state_publisher")
+
+    def test_controller_running(self, proc_info):
+
+        cnames = ["inverted_pendulum_controller", "joint_state_broadcaster"]
+
+        check_controllers_running(self.node, cnames)
+
+        # Wait for controller_spawner to finish and verify successful exit.
+        proc_info.assertWaitForShutdown(
+            process="spawner", cmd_args="joint_state_broadcaster", timeout=30
+        )
+        launch_testing.asserts.assertExitCodes(
+            proc_info, process="spawner", cmd_args="joint_state_broadcaster"
+        )
+        proc_info.assertWaitForShutdown(
+            process="spawner", cmd_args="inverted_pendulum_controller", timeout=30
+        )
+        launch_testing.asserts.assertExitCodes(
+            proc_info, process="spawner", cmd_args="inverted_pendulum_controller"
         )
 
-    def test_controller_active(self):
-        """inverted_pendulum_controller should reach active state."""
-        ctrl, available = self._wait_for_controller_active("inverted_pendulum_controller")
-        if ctrl is None:
-            self.fail(f"inverted_pendulum_controller not active. " f"Available: {available}")
-        self.assertEqual(ctrl.state, "active")
+        # Re-check controllers after spawner has exited.
+        check_controllers_running(self.node, cnames)
+
+    def test_check_if_msgs_published(self):
+        check_if_js_published("/joint_states", ["motor_joint", "pendulum_joint"])
 
     def test_hardware_interfaces_configured(self):
         """Mock hardware should expose correct state and command interfaces."""
