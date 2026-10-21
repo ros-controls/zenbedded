@@ -1,0 +1,1 @@
+demos/inverted_pendulum/inverted_pendulum_ros/meshes/*.stl filter=lfs diff=lfs merge=lfs -text
