@@ -28,6 +28,7 @@ Guides and Examples
    :titlesonly:
 
    Getting Started <getting_started.rst>
+   Supported ROS 2 Distributions <supported_distributions.rst>
    Architecture <architecture.rst>
    Demos <../demos/doc/userdoc.rst>
    Docker <../docker/doc/userdoc.rst>
