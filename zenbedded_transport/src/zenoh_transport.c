@@ -24,8 +24,35 @@ static bool is_initialized = false;
 
 #define MAX_PUBLISHERS CONFIG_ZENBEDDED_MAX_PUBLISHERS
 #define MAX_SUBSCRIBERS CONFIG_ZENBEDDED_MAX_SUBSCRIBERS
-#define KEYEXPR_MAX_LEN CONFIG_ZENBEDDED_MAX_KEYEXPR_LEN
 #define RMW_GID_SIZE 16
+
+#if defined(CONFIG_ZENBEDDED_TIER_1)
+/* ROS 2 / rmw_zenoh Key Expression and Liveliness Overhead Constants */
+#define LV_NODE_FIXED_OVERHEAD 54 /* "@ros2_lv//<32-hex-zid>/0/0/NN/%/%/" */
+#define LV_PUB_SUB_FIXED_OVERHEAD \
+  71 /* "@ros2_lv//<32-hex-zid>/0/10/{MP,MS}/%/%//%///::,7:,:,:,," */
+#define TOPIC_KEYEXPR_FIXED_OVERHEAD \
+  3                             /* Three '/' separators: "<domain_id>/<topic>/<type>/<hash>" */
+#define MAX_DOMAIN_ID_DIGITS 10 /* Full uint32_t range (ROS 2 standard 0-232 uses 3 digits) */
+#define RIHS01_TYPE_HASH_LEN 71 /* "RIHS01_" (7) + 64 hex chars */
+
+#define NODE_LV_KEYEXPR_MAX_LEN \
+  (LV_NODE_FIXED_OVERHEAD + MAX_DOMAIN_ID_DIGITS + CONFIG_ZENBEDDED_MAX_NODE_NAME_LEN + 1)
+
+#define TOPIC_KEYEXPR_MAX_LEN                                                                  \
+  (TOPIC_KEYEXPR_FIXED_OVERHEAD + MAX_DOMAIN_ID_DIGITS + CONFIG_ZENBEDDED_MAX_TOPIC_NAME_LEN + \
+   CONFIG_ZENBEDDED_MAX_TYPE_NAME_LEN + RIHS01_TYPE_HASH_LEN + 1)
+
+#define LV_KEYEXPR_MAX_LEN                                                                 \
+  (LV_PUB_SUB_FIXED_OVERHEAD + MAX_DOMAIN_ID_DIGITS + CONFIG_ZENBEDDED_MAX_NODE_NAME_LEN + \
+   CONFIG_ZENBEDDED_MAX_TOPIC_NAME_LEN + CONFIG_ZENBEDDED_MAX_TYPE_NAME_LEN +              \
+   RIHS01_TYPE_HASH_LEN + 1)
+
+#elif defined(CONFIG_ZENBEDDED_TIER_2)
+
+#define TOPIC_KEYEXPR_MAX_LEN CONFIG_ZENBEDDED_MAX_TOPIC_NAME_LEN
+
+#endif
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
 typedef struct __attribute__((packed))
@@ -41,11 +68,11 @@ struct zenbedded_pub_s
 {
   bool in_use;
   z_owned_publisher_t z_pub;
-  char topic_keyexpr[KEYEXPR_MAX_LEN];
+  char topic_keyexpr[TOPIC_KEYEXPR_MAX_LEN];
 #if defined(CONFIG_ZENBEDDED_TIER_1)
   rmw_zenoh_attachment_t attachment;
   z_owned_liveliness_token_t lv_token;
-  char lv_keyexpr[KEYEXPR_MAX_LEN];
+  char lv_keyexpr[LV_KEYEXPR_MAX_LEN];
 #endif
 };
 
@@ -55,10 +82,10 @@ struct zenbedded_sub_s
   z_owned_subscriber_t z_sub;
   zenbedded_recv_cb_t user_cb;
   void * user_data;
-  char topic_keyexpr[KEYEXPR_MAX_LEN];
+  char topic_keyexpr[TOPIC_KEYEXPR_MAX_LEN];
 #if defined(CONFIG_ZENBEDDED_TIER_1)
   z_owned_liveliness_token_t lv_token;
-  char lv_keyexpr[KEYEXPR_MAX_LEN];
+  char lv_keyexpr[LV_KEYEXPR_MAX_LEN];
 #endif
 };
 
@@ -67,7 +94,7 @@ static struct zenbedded_sub_s sub_pool[MAX_SUBSCRIBERS] = {0};
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
 static z_owned_liveliness_token_t node_lv_token;
-static char node_lv_str[KEYEXPR_MAX_LEN] = {0};
+static char node_lv_str[NODE_LV_KEYEXPR_MAX_LEN] = {0};
 #endif
 
 static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
@@ -82,7 +109,7 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
   size_t len = z_bytes_len(payload);
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
-  uint8_t rx_buf[CONFIG_ZENBEDDED_TIER1_MAX_RX_BUFFER_SIZE];
+  static uint8_t rx_buf[CONFIG_ZENBEDDED_TIER1_MAX_RX_BUFFER_SIZE];
   if (len == 0 || len > sizeof(rx_buf))
   {
     return;
@@ -98,7 +125,7 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
     return;
   }
 
-  uint8_t t2_rx_buf[CONFIG_ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE];
+  static uint8_t t2_rx_buf[CONFIG_ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE];
 
   z_bytes_reader_t reader = z_bytes_get_reader(payload);
   z_bytes_reader_read(&reader, t2_rx_buf, len);
@@ -163,7 +190,7 @@ int zenbedded_transport_init(
   z_id_t zid = z_info_zid(z_session_loan(&z_session));
 
   snprintf(
-    node_lv_str, KEYEXPR_MAX_LEN,
+    node_lv_str, sizeof(node_lv_str),
     "@ros2_lv/%u/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x/0/0/NN/%%/%%/%s",
     current_domain_id, zid.id[0], zid.id[1], zid.id[2], zid.id[3], zid.id[4], zid.id[5], zid.id[6],
     zid.id[7], zid.id[8], zid.id[9], zid.id[10], zid.id[11], zid.id[12], zid.id[13], zid.id[14],
@@ -289,8 +316,8 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
     return NULL;
   }
   snprintf(
-    pub->topic_keyexpr, KEYEXPR_MAX_LEN, "%u/%s/%s/%s", current_domain_id, clean_topic, type_name,
-    type_hash);
+    pub->topic_keyexpr, sizeof(pub->topic_keyexpr), "%u/%s/%s/%s", current_domain_id, clean_topic,
+    type_name, type_hash);
   z_view_keyexpr_from_str_unchecked(&ke, pub->topic_keyexpr);
 
   if (
@@ -301,7 +328,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
     return NULL;
   }
 #elif defined(CONFIG_ZENBEDDED_TIER_2)
-  snprintf(pub->topic_keyexpr, KEYEXPR_MAX_LEN, "%s", clean_topic);
+  snprintf(pub->topic_keyexpr, sizeof(pub->topic_keyexpr), "%s", clean_topic);
   z_view_keyexpr_from_str_unchecked(&ke, pub->topic_keyexpr);
 
   z_publisher_options_t pub_opts;
@@ -329,7 +356,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
 
   z_id_t zid = z_info_zid(z_session_loan(&z_session));
   snprintf(
-    pub->lv_keyexpr, KEYEXPR_MAX_LEN,
+    pub->lv_keyexpr, sizeof(pub->lv_keyexpr),
     "@ros2_lv/%u/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x/0/10/MP/%%/%%/%s/"
     "%%%s/%s/%s/::,7:,:,:,,",
     current_domain_id, zid.id[0], zid.id[1], zid.id[2], zid.id[3], zid.id[4], zid.id[5], zid.id[6],
@@ -432,10 +459,10 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
     return NULL;
   }
   snprintf(
-    sub->topic_keyexpr, KEYEXPR_MAX_LEN, "%u/%s/%s/%s", current_domain_id, clean_topic, type_name,
-    type_hash);
+    sub->topic_keyexpr, sizeof(sub->topic_keyexpr), "%u/%s/%s/%s", current_domain_id, clean_topic,
+    type_name, type_hash);
 #elif defined(CONFIG_ZENBEDDED_TIER_2)
-  snprintf(sub->topic_keyexpr, KEYEXPR_MAX_LEN, "%s", clean_topic);
+  snprintf(sub->topic_keyexpr, sizeof(sub->topic_keyexpr), "%s", clean_topic);
 #endif
 
   z_view_keyexpr_t ke;
@@ -472,7 +499,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
 
   z_id_t zid = z_info_zid(z_session_loan(&z_session));
   snprintf(
-    sub->lv_keyexpr, KEYEXPR_MAX_LEN,
+    sub->lv_keyexpr, sizeof(sub->lv_keyexpr),
     "@ros2_lv/%u/%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x/0/10/MS/%%/%%/%s/"
     "%%%s/%s/%s/::,7:,:,:,,",
     current_domain_id, zid.id[0], zid.id[1], zid.id[2], zid.id[3], zid.id[4], zid.id[5], zid.id[6],
