@@ -56,8 +56,8 @@ menu "Zenbedded RCL Configuration"
                 bool "sensor_msgs/msg/JointState"
 
             # Imu, Float64MultiArray and Twist are disabled until each has a
-            # codec in codecs.hpp and an entry in RIHS_LEDGER. Without both, the
-            # keyexpr ends in UNKNOWN_HASH and no rmw_zenoh peer ever matches.
+            # codec in codecs.hpp and an entry in RIHS_LEDGER. Attempting to use
+            # unmapped message types will cause transport initialization to fail.
             #
             # config ZENBEDDED_RCL_STATE_MSG_IMU
             #     bool "sensor_msgs/msg/Imu"
