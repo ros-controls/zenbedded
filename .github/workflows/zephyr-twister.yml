@@ -75,7 +75,7 @@ jobs:
             --inline-logs \
             -v \
             --outdir twister-out \
-            --jobs 1
+            --jobs 4
 
       - name: Show twister run output
         if: always()

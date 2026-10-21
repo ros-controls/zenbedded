@@ -16,6 +16,16 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#if defined(CONFIG_ZENOH_E2E_DYNAMIC_PORT_OVERRIDE)
+#if defined(CONFIG_ARCH_POSIX)
+#include <nsi_host_trampolines.h>
+#define GET_ENV_VAR(name) nsi_host_getenv(name)
+#else
+#include <stdlib.h>
+#define GET_ENV_VAR(name) getenv(name)
+#endif
+#endif
+
 #include <zenoh-pico.h>
 #include <zephyr/kernel.h>
 
@@ -62,10 +72,26 @@ int main(void)
 
   z_config_default(&config);
 
-  zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, "client");
-  zp_config_insert(z_loan_mut(config), Z_CONFIG_CONNECT_KEY, ENDPOINT);
+  const char * endpoint = ENDPOINT;
+#if defined(CONFIG_ZENOH_E2E_DYNAMIC_PORT_OVERRIDE)
+  const char * env_endpoint = GET_ENV_VAR("ZENBEDDED_ZENOH_ENDPOINT");
+  const char * env_port = GET_ENV_VAR("ZENBEDDED_ZENOH_PORT");
+  static char dynamic_endpoint[64];
+  if (env_endpoint != NULL && env_endpoint[0] != '\0')
+  {
+    endpoint = env_endpoint;
+  }
+  else if (env_port != NULL && env_port[0] != '\0')
+  {
+    snprintf(dynamic_endpoint, sizeof(dynamic_endpoint), "tcp/127.0.0.1:%s", env_port);
+    endpoint = dynamic_endpoint;
+  }
+#endif
 
-  printf("Connecting client to %s\n", ENDPOINT);
+  zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, "client");
+  zp_config_insert(z_loan_mut(config), Z_CONFIG_CONNECT_KEY, endpoint);
+
+  printf("Connecting client to %s\n", endpoint);
 
   if (z_open(&session, z_move(config), NULL) < 0)
   {

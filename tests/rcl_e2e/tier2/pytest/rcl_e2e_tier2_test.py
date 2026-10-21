@@ -33,7 +33,7 @@ def test_tier2_ping_pong(zenoh_router, dut: DeviceAdapter):
     # 2. Initialize Zenoh Python session pointing to the local test router
     conf = zenoh.Config()
     conf.insert_json5("mode", '"client"')
-    conf.insert_json5("connect/endpoints", '["tcp/127.0.0.1:7447"]')
+    conf.insert_json5("connect/endpoints", f'["{zenoh_router}"]')
 
     z = zenoh.open(conf)
 
