@@ -36,8 +36,9 @@ Platform | Status | Notes
 `native_sim/native/64` | ![passing](https://img.shields.io/badge/build-passing-brightgreen) | CI test target; no radio
 Other Zephyr boards | ![not tested](https://img.shields.io/badge/build-not%20tested-yellow) | Requires a network interface supported by zenoh-pico
 
-Zephyr v4.4.2 and the `zenbedded` zenoh-pico fork are pinned in
-[`docker/image-west.yml`](docker/image-west.yml).
+Zephyr v4.4.2 and the ros-controls `zenoh-pico` fork are pinned in
+[`docker/image-west.yml`](docker/image-west.yml) and
+[`zenbedded_transport/west.yml`](zenbedded_transport/west.yml) respectively.
 
 ## Quick start
 
@@ -50,32 +51,13 @@ docker compose up -d
 docker compose exec -it dev-env bash
 ```
 
-Build the host packages:
+CI also exports the dev container as a pre-built image --
+`ghcr.io/ros-controls/zenbedded/zenbedded-dev`, tagged `latest` from `master` and
+`pr-<n>` per pull request -- if you prefer it over building locally.
 
-```bash
-cd /ros2_ws
-rosdep install --from-paths src --ignore-src -r -y
-colcon build --packages-select zenbedded_hardware_interface
-source install/setup.bash
-```
-
-Build and flash the firmware:
-
-```bash
-cd /zephyr_ws/demos/inverted_pendulum/inverted_pendulum_tier2
-west build -p always -b esp32s3_devkitc/esp32s3/procpu
-west flash --esp-device /dev/ttyUSB0
-```
-
-Run the host side:
-
-```bash
-ros2 run rmw_zenoh_cpp rmw_zenohd
-ros2 launch zenbedded_inverted_pendulum inverted_pendulum.launch.py
-```
-
-Add `use_mock_hardware:=true` to the launch command to run without an MCU. See
-[Getting Started](doc/getting_started.rst) for Wi-Fi setup and the full walkthrough.
+Then follow [Getting Started](doc/getting_started.rst) to build the host packages and
+flash a demo, and the [inverted pendulum docs](demos/inverted_pendulum/doc/userdoc.rst)
+to run it (add `use_mock_hardware:=true` to the launch command to run without an MCU).
 
 ## Documentation
 

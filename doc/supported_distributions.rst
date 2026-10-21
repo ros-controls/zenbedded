@@ -78,7 +78,7 @@ Build from source:
    git clone https://github.com/ros-controls/zenbedded.git
    cd ~/zenbedded_ws
    rosdep install --from-paths src --ignore-src -r -y
-   colcon build --packages-select zenbedded_hardware_interface
+   colcon build --packages-select zenbedded_hardware_interface zenbedded_transport
    source install/setup.bash
 
 
@@ -87,17 +87,18 @@ Kilted
 
 Not validated. The host packages use ``ros2_control`` interfaces that are present in
 Kilted, so a source build is expected to work; it is not covered by CI, and no
-end-to-end run is part of the test matrix.
+end-to-end run is part of the test matrix. Set ``ROS_DISTRO`` to the distribution
+you are building for (``kilted`` here):
 
 .. code-block:: bash
 
-   source /opt/ros/kilted/setup.bash
+   source /opt/ros/${ROS_DISTRO}/setup.bash
    mkdir -p ~/zenbedded_ws/src
    cd ~/zenbedded_ws/src
    git clone https://github.com/ros-controls/zenbedded.git
    cd ~/zenbedded_ws
    rosdep install --from-paths src --ignore-src -r -y
-   colcon build --packages-select zenbedded_hardware_interface
+   colcon build --packages-select zenbedded_hardware_interface zenbedded_transport
    source install/setup.bash
 
 The Docker development image is Lyrical-based. For Kilted, build the host packages
@@ -111,16 +112,7 @@ Jazzy
 Not validated, with the same caveats as Kilted: source build expected, no CI lane,
 no end-to-end validation. The firmware side is unaffected.
 
-.. code-block:: bash
-
-   source /opt/ros/jazzy/setup.bash
-   mkdir -p ~/zenbedded_ws/src
-   cd ~/zenbedded_ws/src
-   git clone https://github.com/ros-controls/zenbedded.git
-   cd ~/zenbedded_ws
-   rosdep install --from-paths src --ignore-src -r -y
-   colcon build --packages-select zenbedded_hardware_interface
-   source install/setup.bash
+Follow the `Kilted`_ build steps above with ``ROS_DISTRO`` set to ``jazzy``.
 
 
 Firmware on any distro
@@ -134,7 +126,7 @@ build the application:
 
    cd /zephyr_ws/demos/inverted_pendulum/inverted_pendulum_tier2
    west build -p always -b esp32s3_devkitc/esp32s3/procpu
-   west flash --esp-device /dev/ttyUSB0
+   west flash
 
 See :ref:`docker_userdoc` for the workspace layout.
 
