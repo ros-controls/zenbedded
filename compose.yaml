@@ -13,6 +13,7 @@ services:
       - ./zenbedded_transport:/zephyr_ws/zenbedded_transport
       - ./zenbedded_rcl:/zephyr_ws/zenbedded_rcl
       - ./demos:/zephyr_ws/demos
+      - ./tests:/zephyr_ws/tests
 
     stdin_open: true
     tty: true
