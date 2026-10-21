@@ -18,7 +18,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <zephyr/kernel.h>
+#include <zephyr/spinlock.h>
 
 namespace zenbedded
 {
@@ -31,10 +31,11 @@ public:
 
   void reset()
   {
-    atomic_set(&active_idx_, 0);
-    atomic_set(&version_[0], 0);
-    atomic_set(&version_[1], 0);
-    memset(buffer_, 0, sizeof(buffer_));
+    K_SPINLOCK(&lock_)
+    {
+      active_idx_ = 0;
+      memset(buffer_, 0, sizeof(buffer_));
+    }
   }
 
   uint8_t * slot(size_t idx) { return buffer_[idx]; }
@@ -42,15 +43,13 @@ public:
 
   uint8_t * prepare_write(int & out_write_idx)
   {
-    out_write_idx = atomic_get(&active_idx_) ^ 1;
+    K_SPINLOCK(&lock_) { out_write_idx = active_idx_ ^ 1; }
     return buffer_[out_write_idx];
   }
 
   void commit_write(int write_idx)
   {
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    atomic_inc(&version_[write_idx]);
-    atomic_set(&active_idx_, write_idx);
+    K_SPINLOCK(&lock_) { active_idx_ = write_idx; }
   }
 
   bool write(const uint8_t * data, size_t size)
@@ -72,27 +71,23 @@ public:
     {
       return false;
     }
-    const int read_idx = atomic_get(&active_idx_);
-    const atomic_val_t ver_before = atomic_get(&version_[read_idx]);
-    memcpy(out, buffer_[read_idx], size);
-
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-    if (atomic_get(&active_idx_) != read_idx || atomic_get(&version_[read_idx]) != ver_before)
-    {
-      return false;
-    }
+    K_SPINLOCK(&lock_) { memcpy(out, buffer_[active_idx_], size); }
     return true;
   }
 
   static constexpr size_t capacity() { return Capacity; }
-  [[nodiscard]] int active_index() const { return atomic_get(&active_idx_); }
-  [[nodiscard]] atomic_val_t version(size_t idx) const { return atomic_get(&version_[idx]); }
+
+  [[nodiscard]] int active_index() const
+  {
+    int idx = 0;
+    K_SPINLOCK(&lock_) { idx = active_idx_; }
+    return idx;
+  }
 
 private:
   uint8_t buffer_[2][Capacity]{};
-  mutable atomic_t active_idx_{};
-  mutable atomic_t version_[2]{};
+  mutable struct k_spinlock lock_{};
+  int active_idx_{0};
 };
 
 template <typename T>
@@ -103,11 +98,12 @@ public:
 
   void reset()
   {
-    atomic_set(&active_idx_, 0);
-    atomic_set(&version_[0], 0);
-    atomic_set(&version_[1], 0);
-    slots_[0] = T{};
-    slots_[1] = T{};
+    K_SPINLOCK(&lock_)
+    {
+      active_idx_ = 0;
+      slots_[0] = T{};
+      slots_[1] = T{};
+    }
   }
 
   T & slot(size_t idx) { return slots_[idx]; }
@@ -115,15 +111,13 @@ public:
 
   T & prepare_write(int & out_write_idx)
   {
-    out_write_idx = atomic_get(&active_idx_) ^ 1;
+    K_SPINLOCK(&lock_) { out_write_idx = active_idx_ ^ 1; }
     return slots_[out_write_idx];
   }
 
   void commit_write(int write_idx)
   {
-    __atomic_thread_fence(__ATOMIC_RELEASE);
-    atomic_inc(&version_[write_idx]);
-    atomic_set(&active_idx_, write_idx);
+    K_SPINLOCK(&lock_) { active_idx_ = write_idx; }
   }
 
   void write(const T & value)
@@ -135,26 +129,21 @@ public:
 
   bool read_latest(T & out) const
   {
-    const int read_idx = atomic_get(&active_idx_);
-    const atomic_val_t ver_before = atomic_get(&version_[read_idx]);
-    out = slots_[read_idx];
-
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
-    if (atomic_get(&active_idx_) != read_idx || atomic_get(&version_[read_idx]) != ver_before)
-    {
-      return false;
-    }
+    K_SPINLOCK(&lock_) { out = slots_[active_idx_]; }
     return true;
   }
 
-  [[nodiscard]] int active_index() const { return atomic_get(&active_idx_); }
-  [[nodiscard]] atomic_val_t version(size_t idx) const { return atomic_get(&version_[idx]); }
+  [[nodiscard]] int active_index() const
+  {
+    int idx = 0;
+    K_SPINLOCK(&lock_) { idx = active_idx_; }
+    return idx;
+  }
 
 private:
   T slots_[2]{};
-  mutable atomic_t active_idx_{};
-  mutable atomic_t version_[2]{};
+  mutable struct k_spinlock lock_{};
+  int active_idx_{0};
 };
 
 }  // namespace zenbedded
