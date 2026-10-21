@@ -31,7 +31,7 @@ Guides and Examples
    Supported ROS 2 Distributions <supported_distributions.rst>
    Architecture <architecture.rst>
    Demos <../demos/doc/userdoc.rst>
-   Tests <../tests/zenoh_e2e/README.rst>
+   Tests <../tests/zenoh_e2e/userdoc.rst>
    Docker <../docker/doc/userdoc.rst>
    Benchmarking <benchmarking.rst>
 
