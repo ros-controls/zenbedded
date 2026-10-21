@@ -10,10 +10,8 @@
 #include "zenbedded_transport/zenoh_transport.h"
 
 #ifdef CONFIG_TIER1_TEST_INGRESS
-// 1. Define global context so the callback knows how to parse the incoming bytes
 zcdr_joint_command_ctx_t ctx_sub_1;
 
-// 2. The independent subscriber callback
 void cmd_1_rx_callback(const uint8_t * payload, size_t size, void * user_data)
 {
   zcdr_joint_command_ctx_t * ctx = reinterpret_cast<zcdr_joint_command_ctx_t *>(user_data);
@@ -57,7 +55,6 @@ int main(void)
 
 #ifdef CONFIG_ZENBEDDED_TIER_1
 
-  // Pass Kconfig macros directly into the transport API
   printf("[SYS] zenoh transport lease = %d ms\n", static_cast<int>(Z_TRANSPORT_LEASE));
 
   if (
@@ -80,7 +77,7 @@ int main(void)
 
   zenbedded_pub_t pub_joints =
     zenbedded_transport_declare_publisher("joint_states", "sensor_msgs::msg::dds_::JointState_");
-  k_msleep(10);  // Pace graph declarations
+  k_msleep(10);
 
   double pos_2[] = {0.0, 0.0};
   double vel_2[] = {0.0, 0.0};
@@ -94,19 +91,20 @@ int main(void)
 
   zenbedded_transport_declare_subscriber(
     "joint_commands", "control_msgs::msg::dds_::JointCommand_", cmd_1_rx_callback, &ctx_sub_1);
-  k_msleep(10);  // Pace graph declarations
+  k_msleep(10);
 #endif
 
+#ifdef CONFIG_TIER1_TEST_EGRESS
   // --- TIMING SETUP ---
   uint32_t last_100hz_time = k_uptime_get_32();
+#endif
 
   printf("\n[SYS] Entering High-Frequency Event Loop...\n\n");
 
   while (1)
   {
-    uint32_t current_time = k_uptime_get_32();
 #ifdef CONFIG_TIER1_TEST_EGRESS
-    // 2. PUB 1: 100Hz LOOP (Every 10 ms)
+    uint32_t current_time = k_uptime_get_32();
     if ((current_time - last_100hz_time) >= 10)
     {
       zcdr_serialize_joint_state(&ctx_joints, 0, 0, pos_2, vel_2, eff_2, buf_joints);
@@ -115,7 +113,6 @@ int main(void)
       last_100hz_time = current_time;
     }
 #endif
-    // Yield CPU for 1ms to prevent starvation on native_sim
     k_sleep(K_MSEC(1));
   }
 #else

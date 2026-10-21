@@ -23,4 +23,16 @@ tests:
       - native_sim/native/64
     harness_config:
       pytest_dut_scope: function
-      pytest_args: ["-o", "env=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"]
+      pytest_args: ["-o", "env=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-k", "-test_mcu_publishes_to_ros2 or test_ros2_commands_mcu"]
+
+  sample.zenbedded.transport.ingress_only:
+    harness: pytest
+    platform_allow:
+      - native_sim/native/64
+    timeout: 150
+    extra_configs:
+      - CONFIG_TIER1_TEST_INGRESS=y
+      - CONFIG_TIER1_TEST_EGRESS=n
+    harness_config:
+      pytest_dut_scope: function
+      pytest_args: ["-o", "env=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "-k", "test_ingress_only"]
