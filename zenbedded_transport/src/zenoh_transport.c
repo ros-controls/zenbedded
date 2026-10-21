@@ -274,7 +274,20 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
   z_view_keyexpr_t ke;
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
+  if (type_name == NULL)
+  {
+    LOG_ERR("Publisher declaration failed: type_name cannot be NULL in Tier 1");
+    pub->in_use = false;
+    return NULL;
+  }
   const char * type_hash = zenbedded_get_rihs_hash(type_name);
+  if (type_hash == NULL)
+  {
+    LOG_ERR(
+      "Publisher declaration failed: unknown message type '%s' (not in RIHS ledger)", type_name);
+    pub->in_use = false;
+    return NULL;
+  }
   snprintf(
     pub->topic_keyexpr, KEYEXPR_MAX_LEN, "%u/%s/%s/%s", current_domain_id, clean_topic, type_name,
     type_hash);
@@ -404,7 +417,20 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
   const char * clean_topic = (topic_name[0] == '/') ? topic_name + 1 : topic_name;
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
+  if (type_name == NULL)
+  {
+    LOG_ERR("Subscriber declaration failed: type_name cannot be NULL in Tier 1");
+    sub->in_use = false;
+    return NULL;
+  }
   const char * type_hash = zenbedded_get_rihs_hash(type_name);
+  if (type_hash == NULL)
+  {
+    LOG_ERR(
+      "Subscriber declaration failed: unknown message type '%s' (not in RIHS ledger)", type_name);
+    sub->in_use = false;
+    return NULL;
+  }
   snprintf(
     sub->topic_keyexpr, KEYEXPR_MAX_LEN, "%u/%s/%s/%s", current_domain_id, clean_topic, type_name,
     type_hash);

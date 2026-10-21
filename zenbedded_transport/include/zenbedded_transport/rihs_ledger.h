@@ -35,6 +35,10 @@ static const zenbedded_rihs_mapping_t RIHS_LEDGER[] = {
 
 static inline const char * zenbedded_get_rihs_hash(const char * type_name)
 {
+  if (type_name == NULL)
+  {
+    return NULL;
+  }
   size_t ledger_size = sizeof(RIHS_LEDGER) / sizeof(RIHS_LEDGER[0]);
   for (size_t i = 0; i < ledger_size; i++)
   {
@@ -43,7 +47,7 @@ static inline const char * zenbedded_get_rihs_hash(const char * type_name)
       return RIHS_LEDGER[i].rihs_hash;
     }
   }
-  return "UNKNOWN_HASH";
+  return NULL;
 }
 
 #endif  // ZENBEDDED_TRANSPORT__RIHS_LEDGER_H_
