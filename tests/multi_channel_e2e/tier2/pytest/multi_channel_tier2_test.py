@@ -12,11 +12,78 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import queue
+import struct
 import time
+
 import pytest
 from twister_harness import DeviceAdapter
+import zenoh
 
 TIMEOUT_SEC = 10.0
+MATCHING_TIMEOUT_SEC = 10.0
+
+
+class ZenohMultiChannelClient:
+    def __init__(self, session):
+        self.session = session
+        self.motor_state_queue = queue.Queue()
+        self.telemetry_queue = queue.Queue()
+
+        self.sub_motor = session.declare_subscriber("robot/motor/state", self._on_motor_sample)
+        self.sub_telem = session.declare_subscriber("robot/telemetry", self._on_telem_sample)
+
+        self.pub_motor = session.declare_publisher("robot/motor/cmd")
+        self.pub_mode = session.declare_publisher("robot/mode/cmd")
+
+    def _on_motor_sample(self, sample):
+        payload_bytes = bytes(sample.payload)
+        if len(payload_bytes) == struct.calcsize("<dd"):
+            pos, vel = struct.unpack("<dd", payload_bytes)
+            self.motor_state_queue.put({"position": pos, "velocity": vel})
+
+    def _on_telem_sample(self, sample):
+        payload_bytes = bytes(sample.payload)
+        if len(payload_bytes) == struct.calcsize("<ff"):
+            volt, temp = struct.unpack("<ff", payload_bytes)
+            self.telemetry_queue.put({"voltage": volt, "temperature": temp})
+
+    def wait_for_matching(self, timeout=MATCHING_TIMEOUT_SEC):
+        deadline = time.monotonic() + timeout
+        while not (
+            self.pub_motor.matching_status.matching and self.pub_mode.matching_status.matching
+        ):
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
+
+    def publish_motor_cmd(self, effort: float):
+        self.pub_motor.put(struct.pack("<d", float(effort)))
+
+    def publish_mode_cmd(self, mode_id: int, flags: int):
+        self.pub_mode.put(struct.pack("<ii", int(mode_id), int(flags)))
+
+    def close(self):
+        self.sub_motor.undeclare()
+        self.sub_telem.undeclare()
+        self.pub_motor.undeclare()
+        self.pub_mode.undeclare()
+
+
+@pytest.fixture
+def zenoh_multi_channel_client(zenoh_router):
+    conf = zenoh.Config()
+    conf.insert_json5("mode", '"client"')
+    conf.insert_json5("connect/endpoints", '["tcp/127.0.0.1:7447"]')
+
+    session = zenoh.open(conf)
+    client = ZenohMultiChannelClient(session)
+
+    try:
+        yield client
+    finally:
+        client.close()
+        session.close()
 
 
 def test_tier2_mcu_publishes_multi_channel(

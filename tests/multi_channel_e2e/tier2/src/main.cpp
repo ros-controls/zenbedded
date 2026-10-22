@@ -79,7 +79,7 @@ int main()
   printk("       (Tier 2 Raw: 2 Pub, 2 Sub)        \n");
   printk("=========================================\n");
 
-  ZenbeddedNode node("tier2_multi_node", 0);
+  ZenbeddedNode node("tier2_multi_node");
   if (node.init() != 0)
   {
     printk("[FATAL] Failed to initialize ZenbeddedNode\n");

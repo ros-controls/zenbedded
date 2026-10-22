@@ -12,11 +12,77 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import queue
+import threading
 import time
 
+import pytest
+import rclpy
+from control_msgs.msg import JointCommand
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
 from twister_harness import DeviceAdapter
 
 TIMEOUT_SEC = 10.0
+
+
+class MultiChannelHostNode(Node):
+    def __init__(self):
+        super().__init__("multi_channel_host_node")
+        self.arm_state_queue = queue.Queue()
+        self.gripper_state_queue = queue.Queue()
+
+        self.sub_arm = self.create_subscription(
+            JointState,
+            "/robot/arm/joint_states",
+            lambda msg: self.arm_state_queue.put(msg),
+            10,
+        )
+        self.sub_gripper = self.create_subscription(
+            JointState,
+            "/robot/gripper/joint_states",
+            lambda msg: self.gripper_state_queue.put(msg),
+            10,
+        )
+
+        self.pub_arm_cmd = self.create_publisher(JointCommand, "/robot/arm/joint_cmd", 10)
+        self.pub_gripper_cmd = self.create_publisher(JointCommand, "/robot/gripper/joint_cmd", 10)
+
+    def publish_arm_cmd(self, joint_names, interface_name, values):
+        cmd = JointCommand(
+            joint_names=joint_names,
+            interface_name=interface_name,
+            values=values,
+        )
+        cmd.header.frame_id = "arm_base"
+        self.pub_arm_cmd.publish(cmd)
+
+    def publish_gripper_cmd(self, joint_names, interface_name, values):
+        cmd = JointCommand(
+            joint_names=joint_names,
+            interface_name=interface_name,
+            values=values,
+        )
+        cmd.header.frame_id = "gripper_base"
+        self.pub_gripper_cmd.publish(cmd)
+
+
+class MultiChannelHostContext:
+    def __enter__(self):
+        rclpy.init()
+        self.node = MultiChannelHostNode()
+        self.executor_thread = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
+        self.executor_thread.start()
+        return self.node
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        rclpy.shutdown()
+        self.executor_thread.join(timeout=1.0)
+
+
+@pytest.fixture
+def host_context(zenoh_router):
+    return MultiChannelHostContext
 
 
 def test_tier1_mcu_publishes_multi_channel(zenoh_router, dut: DeviceAdapter, host_context):

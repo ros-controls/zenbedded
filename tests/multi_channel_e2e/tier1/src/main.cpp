@@ -54,7 +54,7 @@ int main()
   printk("       (Tier 1 CDR: 2 Pub, 2 Sub)        \n");
   printk("=========================================\n");
 
-  ZenbeddedNode node("tier1_multi_node", 0);
+  ZenbeddedNode node("tier1_multi_node");
   if (node.init() != 0)
   {
     printk("[FATAL] Failed to initialize ZenbeddedNode\n");
