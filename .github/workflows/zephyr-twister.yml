@@ -74,8 +74,7 @@ jobs:
             --platform esp32s3_devkitc/esp32s3/procpu \
             --inline-logs \
             -v \
-            --outdir twister-out \
-            --jobs 4
+            --outdir twister-out
 
       - name: Show twister run output
         if: always()

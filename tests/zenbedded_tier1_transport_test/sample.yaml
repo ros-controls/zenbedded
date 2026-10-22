@@ -6,7 +6,6 @@ tests:
   sample.zenbedded.transport.build:
     build_only: true
     platform_allow:
-      - native_sim/native/64
       - esp32s3_devkitc/esp32s3/procpu
 
   sample.zenbedded.transport.asan:

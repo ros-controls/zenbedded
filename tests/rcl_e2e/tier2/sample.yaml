@@ -6,7 +6,6 @@ tests:
   sample.zenbedded.rcl_e2e_tier2.build:
     build_only: true
     platform_allow:
-      - native_sim/native/64
       - esp32s3_devkitc/esp32s3/procpu
 
   sample.zenbedded.rcl_e2e_tier2.native_sim:
