@@ -122,8 +122,67 @@ config ZENBEDDED_NODE_NAME
       The unique identifier for this specific microcontroller on the network.
 
 # ==============================================================================
-# TIER 2 CONFIGURATION
+# BUFFER & POOL SIZING CONFIGURATION
 # ==============================================================================
+
+config ZENBEDDED_MAX_NODE_NAME_LEN
+    int "Maximum Node Name Length"
+    default 64
+    range 16 256
+    help
+      Maximum length of the ROS 2 node name string buffer (including null terminator).
+
+config ZENBEDDED_MAX_TOPIC_NAME_LEN
+    int "Maximum Topic Name Length"
+    default 64
+    range 16 256
+    help
+      Maximum length of topic name strings and mangled topic buffers (including null terminator).
+
+config ZENBEDDED_MAX_TYPE_NAME_LEN
+    int "Maximum DDS Type Name Length"
+    depends on ZENBEDDED_TIER_1
+    default 64
+    range 16 256
+    help
+      Maximum length of ROS 2 DDS type name strings (including null terminator, e.g. sensor_msgs::msg::dds_::JointState_).
+
+config ZENBEDDED_MAX_LOCATOR_LEN
+    int "Maximum Locator String Length"
+    default 32
+    range 32 512
+    help
+      Maximum length of Zenoh locator strings (e.g. tcp/127.0.0.1:7447).
+
+config ZENBEDDED_MAX_PUBLISHERS
+    int "Maximum Number of Publishers"
+    default 10
+    range 0 64
+    help
+      Maximum number of concurrent publishers supported by the transport pool.
+
+config ZENBEDDED_MAX_SUBSCRIBERS
+    int "Maximum Number of Subscribers"
+    default 10
+    range 0 64
+    help
+      Maximum number of concurrent subscribers supported by the transport pool.
+
+config ZENBEDDED_TIER1_MAX_RX_BUFFER_SIZE
+    int "Tier 1 Maximum RX Buffer Size"
+    depends on ZENBEDDED_TIER_1
+    default 1024
+    range 64 4096
+    help
+      Maximum payload buffer size in bytes for Tier 1 subscriber reception (Serialized ROS2 message size).
+
+config ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE
+    int "Tier 2 Maximum RX Buffer Size"
+    depends on ZENBEDDED_TIER_2
+    default 64
+    range 8 512
+    help
+      Maximum payload buffer size in bytes for Tier 2 subscriber reception (size of the generated tier2 state struct).
 
 config ZENBEDDED_TIER2_SCHEMA_PATH
     string "Path to Tier 2 YAML Schema"

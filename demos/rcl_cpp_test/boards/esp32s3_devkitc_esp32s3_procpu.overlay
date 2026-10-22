@@ -1,5 +1,0 @@
-#include <cdc_ecm_overlay.dtsi>
-
-&wifi {
-	status = "okay";
-};

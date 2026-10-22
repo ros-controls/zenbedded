@@ -1,9 +1,0 @@
-sample:
-  name: Zenbedded RCL test
-common:
-  build_only: true
-  tags: zenbedded_rcl
-tests:
-  sample.zenbedded.rcl_cpp_test:
-    platform_allow:
-      - esp32s3_devkitc/esp32s3/procpu

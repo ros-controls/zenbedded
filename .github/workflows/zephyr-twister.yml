@@ -4,6 +4,7 @@ on:
   pull_request:
     paths: &zephyr_twister_paths
       - 'demos/**'
+      - 'tests/**'
       - 'zenbedded_rcl/**'
       - 'zenbedded_transport/**'
       - 'docker/**'
@@ -68,6 +69,7 @@ jobs:
           export ZEPHYR_BASE=/zephyr_ws/zephyr
           "$ZEPHYR_BASE/scripts/twister" \
             --testsuite-root demos \
+            --testsuite-root tests \
             --platform native_sim/native/64 \
             --platform esp32s3_devkitc/esp32s3/procpu \
             --inline-logs \
