@@ -134,8 +134,22 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
 #endif
 }
 
+zenbedded_mode_t zenbedded_mode_from_str(const char * mode_str)
+{
+  if (mode_str && strcmp(mode_str, "peer") == 0)
+  {
+    return ZENBEDDED_MODE_PEER;
+  }
+  return ZENBEDDED_MODE_CLIENT;
+}
+
+const char * zenbedded_mode_to_str(zenbedded_mode_t mode)
+{
+  return (mode == ZENBEDDED_MODE_PEER) ? "peer" : "client";
+}
+
 int zenbedded_transport_init(
-  uint32_t domain_id, const char * node_name, const char * mode, const char * locator)
+  uint32_t domain_id, const char * node_name, zenbedded_mode_t mode, const char * locator)
 {
   if (atomic_inc(&transport_ref_count) > 0)
   {
@@ -149,7 +163,7 @@ int zenbedded_transport_init(
 
   z_owned_config_t z_config;
   z_config_default(&z_config);
-  zp_config_insert(z_config_loan_mut(&z_config), Z_CONFIG_MODE_KEY, mode);
+  zp_config_insert(z_config_loan_mut(&z_config), Z_CONFIG_MODE_KEY, zenbedded_mode_to_str(mode));
 
   static char full_locator[CONFIG_ZENBEDDED_MAX_LOCATOR_LEN];
 

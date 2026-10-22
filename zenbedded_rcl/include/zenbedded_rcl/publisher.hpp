@@ -28,7 +28,11 @@
 class ZenbeddedPublisherBase
 {
 public:
-  ZenbeddedPublisherBase() { reset_buffer(); }
+  ZenbeddedPublisherBase()
+  {
+    reset_buffer();
+    k_work_init_delayable(&periodic_work_, periodic_work_handler);
+  }
 
   ~ZenbeddedPublisherBase() { destroy(); }
 
@@ -58,46 +62,46 @@ public:
     return zenbedded_transport_publish(pub_handle_, payload, size);
   }
 
-  int start_periodic_publish(uint32_t freq_hz)
+  int start_periodic_publish(k_timeout_t period)
   {
     if (!initialized_)
     {
       return -ENODEV;
     }
-    if (freq_hz == 0)
+    if (K_TIMEOUT_EQ(period, K_FOREVER) || K_TIMEOUT_EQ(period, K_NO_WAIT))
     {
       return -EINVAL;
     }
-    if (thread_started_)
+    if (atomic_get(&periodic_running_))
     {
       stop_periodic_publish();
-      k_sleep(K_MSEC(10));
     }
 
-    publish_freq_ = freq_hz;
-    atomic_set(&thread_running_, 1);
-
-    k_thread_create(
-      &thread_, thread_stack_, K_KERNEL_STACK_SIZEOF(thread_stack_), thread_fn, this, nullptr,
-      nullptr, CONFIG_ZENBEDDED_RCL_THREAD_PRIORITY, 0, K_NO_WAIT);
-
-    thread_started_ = true;
+    publish_period_ = period;
+    atomic_set(&periodic_running_, 1);
+    k_work_schedule(&periodic_work_, publish_period_);
     return 0;
+  }
+
+  int start_periodic_publish(uint32_t period_ms)
+  {
+    if (period_ms == 0)
+    {
+      return -EINVAL;
+    }
+    return start_periodic_publish(K_MSEC(period_ms));
   }
 
   void stop_periodic_publish()
   {
-    if (!thread_started_)
+    if (!atomic_get(&periodic_running_))
     {
       return;
     }
-    atomic_set(&thread_running_, 0);
-    if (k_thread_join(&thread_, K_MSEC(200)) != 0)
-    {
-      k_thread_abort(&thread_);
-    }
-    thread_started_ = false;
-    publish_freq_ = 0;
+    atomic_set(&periodic_running_, 0);
+    struct k_work_sync sync;
+    k_work_cancel_delayable_sync(&periodic_work_, &sync);
+    publish_period_ = K_FOREVER;
   }
 
 protected:
@@ -137,42 +141,33 @@ protected:
   bool initialized_ = false;
   size_t payload_size_ = 0;
 
-private:
-  zenbedded::DoubleByteBuffer<CONFIG_ZENBEDDED_MAX_STATE_BUFFER_SIZE> buffer_;
+  struct k_work_delayable periodic_work_{};
+  k_timeout_t publish_period_ = K_FOREVER;
+  atomic_t periodic_running_ = 0;
 
-  uint32_t publish_freq_ = 0;
-  atomic_t thread_running_ = 0;
-  bool thread_started_ = false;
-  k_thread thread_{};
-  K_KERNEL_STACK_MEMBER(thread_stack_, CONFIG_ZENBEDDED_RCL_THREAD_STACK_SIZE) {};
-
-  static void thread_fn(void * arg1, void * arg2, void * arg3)
+  static void periodic_work_handler(struct k_work * work)
   {
-    ARG_UNUSED(arg2);
-    ARG_UNUSED(arg3);
-    auto * self = static_cast<ZenbeddedPublisherBase *>(arg1);
-    if (!self)
+    auto * dwork = k_work_delayable_from_work(work);
+    auto * self = CONTAINER_OF(dwork, ZenbeddedPublisherBase, periodic_work_);
+    if (!self || !atomic_get(&self->periodic_running_))
     {
       return;
     }
 
-    const uint32_t period_ms = MAX(1000 / self->publish_freq_, 1);
-    uint32_t prev_time = k_uptime_get_32();
     uint8_t tmp[CONFIG_ZENBEDDED_MAX_STATE_BUFFER_SIZE];
-
-    while (atomic_get(&self->thread_running_))
+    if (self->read_active_buffer(tmp, self->payload_size_))
     {
-      while (!self->read_active_buffer(tmp, self->payload_size_))
-      {
-      }
       self->publish_raw(tmp, self->payload_size_);
+    }
 
-      const uint32_t diff = k_uptime_get_32() - prev_time;
-      const uint32_t sleep_ms = (diff >= period_ms) ? 1 : (period_ms - diff);
-      k_sleep(K_MSEC(sleep_ms));
-      prev_time = k_uptime_get_32();
+    if (atomic_get(&self->periodic_running_))
+    {
+      k_work_schedule(&self->periodic_work_, self->publish_period_);
     }
   }
+
+private:
+  zenbedded::DoubleByteBuffer<CONFIG_ZENBEDDED_MAX_STATE_BUFFER_SIZE> buffer_;
 };
 
 template <typename Codec>

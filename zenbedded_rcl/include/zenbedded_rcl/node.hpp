@@ -24,6 +24,8 @@
 #include "zenbedded_rcl/subscriber.hpp"
 #include "zenbedded_transport/zenoh_transport.h"
 
+using ZenohMode = zenbedded_mode_t;
+
 class ZenbeddedNode
 {
 public:
@@ -37,8 +39,8 @@ public:
   ~ZenbeddedNode() { destroy(); }
 
   int init(
-    const char * locator = CONFIG_ZENBEDDED_ZENOH_IP_PORT,
-    const char * mode = CONFIG_ZENBEDDED_ZENOH_MODE)
+    const char * locator = ZENBEDDED_DEFAULT_LOCATOR,
+    zenbedded_mode_t mode = ZENBEDDED_DEFAULT_MODE)
   {
     if (initialized_)
     {
@@ -48,9 +50,13 @@ public:
     if (ret == 0)
     {
       initialized_ = true;
-      k_msleep(20);  // Allow background read and lease tasks to settle
     }
     return ret;
+  }
+
+  int init(const char * locator, const char * mode_str)
+  {
+    return init(locator, zenbedded_mode_from_str(mode_str));
   }
 
   void destroy()
@@ -74,18 +80,7 @@ public:
     {
       return -ENODEV;
     }
-    int ret = -1;
-    for (int attempt = 0; attempt < 5; attempt++)
-    {
-      ret = pub.init(topic_name, params);
-      if (ret == 0)
-      {
-        k_msleep(10);  // Pace graph declarations
-        return 0;
-      }
-      k_msleep(50);
-    }
-    return ret;
+    return pub.init(topic_name, params);
   }
 
   template <typename Codec>
@@ -98,23 +93,12 @@ public:
     {
       return -ENODEV;
     }
-    int ret = -1;
-    for (int attempt = 0; attempt < 5; attempt++)
-    {
-      ret = sub.init(topic_name, cb, user_data, params);
-      if (ret == 0)
-      {
-        k_msleep(10);  // Pace graph declarations
-        return 0;
-      }
-      k_msleep(50);
-    }
-    return ret;
+    return sub.init(topic_name, cb, user_data, params);
   }
 
 private:
-  uint32_t domain_id_ = 0;
-  const char * node_name_ = nullptr;
+  uint32_t domain_id_;
+  const char * node_name_;
   bool initialized_ = false;
 };
 

@@ -57,8 +57,8 @@ int ZenbeddedClientBase::init_base(
 
   if (
     zenbedded_transport_init(
-      CONFIG_ZENBEDDED_DOMAIN_ID, CONFIG_ZENBEDDED_NODE_NAME, CONFIG_ZENBEDDED_ZENOH_MODE,
-      CONFIG_ZENBEDDED_ZENOH_IP_PORT) != 0)
+      CONFIG_ZENBEDDED_DOMAIN_ID, CONFIG_ZENBEDDED_NODE_NAME, ZENBEDDED_DEFAULT_MODE,
+      ZENBEDDED_DEFAULT_LOCATOR) != 0)
   {
     LOG_ERR("Failed to initialize zenbedded transport");
     return -EIO;
