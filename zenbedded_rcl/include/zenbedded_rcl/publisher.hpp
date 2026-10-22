@@ -31,7 +31,8 @@ public:
   ZenbeddedPublisherBase()
   {
     reset_buffer();
-    k_work_init_delayable(&periodic_work_, periodic_work_handler);
+    periodic_ctx_.owner = this;
+    k_work_init_delayable(&periodic_ctx_.work, periodic_work_handler);
   }
 
   ~ZenbeddedPublisherBase() { destroy(); }
@@ -79,7 +80,7 @@ public:
 
     publish_period_ = period;
     atomic_set(&periodic_running_, 1);
-    k_work_schedule(&periodic_work_, publish_period_);
+    k_work_schedule(&periodic_ctx_.work, publish_period_);
     return 0;
   }
 
@@ -100,7 +101,7 @@ public:
     }
     atomic_set(&periodic_running_, 0);
     struct k_work_sync sync;
-    k_work_cancel_delayable_sync(&periodic_work_, &sync);
+    k_work_cancel_delayable_sync(&periodic_ctx_.work, &sync);
     publish_period_ = K_FOREVER;
   }
 
@@ -137,18 +138,25 @@ protected:
 
   void reset_buffer() { buffer_.reset(); }
 
+  struct PeriodicWorkContext
+  {
+    struct k_work_delayable work{};
+    ZenbeddedPublisherBase * owner = nullptr;
+  };
+
   zenbedded_pub_t pub_handle_ = nullptr;
   bool initialized_ = false;
   size_t payload_size_ = 0;
 
-  struct k_work_delayable periodic_work_{};
+  PeriodicWorkContext periodic_ctx_{};
   k_timeout_t publish_period_ = K_FOREVER;
   atomic_t periodic_running_ = 0;
 
   static void periodic_work_handler(struct k_work * work)
   {
     auto * dwork = k_work_delayable_from_work(work);
-    auto * self = CONTAINER_OF(dwork, ZenbeddedPublisherBase, periodic_work_);
+    auto * ctx = CONTAINER_OF(dwork, PeriodicWorkContext, work);
+    auto * self = ctx != nullptr ? ctx->owner : nullptr;
     if (!self || !atomic_get(&self->periodic_running_))
     {
       return;
@@ -162,7 +170,7 @@ protected:
 
     if (atomic_get(&self->periodic_running_))
     {
-      k_work_schedule(&self->periodic_work_, self->publish_period_);
+      k_work_schedule(&self->periodic_ctx_.work, self->publish_period_);
     }
   }
 
