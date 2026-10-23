@@ -72,9 +72,7 @@ int main(void)
 {
   LOG_INF("--- Zenbedded Tier 2 Ping-Pong Node ---");
 
-  if (
-    zenbedded_transport_init(
-      0, "mcu", CONFIG_ZENBEDDED_ZENOH_MODE, CONFIG_ZENBEDDED_ZENOH_IP_PORT) != 0)
+  if (zenbedded_transport_init(0, "mcu", ZENBEDDED_DEFAULT_MODE, ZENBEDDED_DEFAULT_LOCATOR) != 0)
   {
     LOG_ERR("Failed to initialize transport");
     return -1;

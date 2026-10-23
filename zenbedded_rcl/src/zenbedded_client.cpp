@@ -28,7 +28,8 @@ ZenbeddedClientBase::ZenbeddedClientBase() { reset_buffers(); }
 ZenbeddedClientBase::~ZenbeddedClientBase() { destroy(); }
 
 int ZenbeddedClientBase::init_base(
-  uint32_t control_freq, size_t state_payload_size, size_t cmd_payload_size)
+  uint32_t control_freq, size_t state_payload_size, size_t cmd_payload_size, const char * pub_topic,
+  const char * sub_topic)
 {
   if (initialized_)
   {
@@ -56,8 +57,8 @@ int ZenbeddedClientBase::init_base(
 
   if (
     zenbedded_transport_init(
-      CONFIG_ZENBEDDED_DOMAIN_ID, CONFIG_ZENBEDDED_NODE_NAME, CONFIG_ZENBEDDED_ZENOH_MODE,
-      CONFIG_ZENBEDDED_ZENOH_IP_PORT) != 0)
+      CONFIG_ZENBEDDED_DOMAIN_ID, CONFIG_ZENBEDDED_NODE_NAME, ZENBEDDED_DEFAULT_MODE,
+      ZENBEDDED_DEFAULT_LOCATOR) != 0)
   {
     LOG_ERR("Failed to initialize zenbedded transport");
     return -EIO;
@@ -69,18 +70,23 @@ int ZenbeddedClientBase::init_base(
   cmd_type = CONFIG_ZENBEDDED_RCL_CMD_MSG_TYPE_STRING;
 #endif
 
-  pub_ = zenbedded_transport_declare_publisher(CONFIG_ZENBEDDED_RCL_PUB_TOPIC, state_type);
+  const char * effective_pub_topic = pub_topic ? pub_topic : CONFIG_ZENBEDDED_RCL_PUB_TOPIC;
+  const char * effective_sub_topic = sub_topic ? sub_topic : CONFIG_ZENBEDDED_RCL_SUB_TOPIC;
+
+  pub_ = zenbedded_transport_declare_publisher(effective_pub_topic, state_type);
   if (pub_ == nullptr)
   {
-    LOG_ERR("Failed to declare publisher");
+    LOG_ERR("Failed to declare publisher on topic '%s'", effective_pub_topic);
     zenbedded_transport_destroy();
     return -EIO;
   }
   sub_ = zenbedded_transport_declare_subscriber(
-    CONFIG_ZENBEDDED_RCL_SUB_TOPIC, cmd_type, on_transport_cmd_cb, this);
+    effective_sub_topic, cmd_type, on_transport_cmd_cb, this);
   if (sub_ == nullptr)
   {
-    LOG_ERR("Failed to declare subscriber");
+    LOG_ERR("Failed to declare subscriber on topic '%s'", effective_sub_topic);
+    zenbedded_transport_undeclare_publisher(pub_);
+    pub_ = nullptr;
     zenbedded_transport_destroy();
     return -EIO;
   }
@@ -102,10 +108,18 @@ void ZenbeddedClientBase::destroy()
     return;
   }
   stop_thread();
+  if (pub_)
+  {
+    zenbedded_transport_undeclare_publisher(pub_);
+    pub_ = nullptr;
+  }
+  if (sub_)
+  {
+    zenbedded_transport_undeclare_subscriber(sub_);
+    sub_ = nullptr;
+  }
   zenbedded_transport_destroy();
 
-  pub_ = nullptr;
-  sub_ = nullptr;
   initialized_ = false;
   LOG_INF("ZenbeddedClient deinitialized");
 }

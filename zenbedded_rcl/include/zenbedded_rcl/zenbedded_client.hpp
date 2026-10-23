@@ -23,6 +23,13 @@
 #include "zenbedded_rcl/double_buffer.hpp"
 #include "zenbedded_transport/zenoh_transport.h"
 
+struct ZenbeddedClientConfig
+{
+  const char * pub_topic = nullptr;
+  const char * sub_topic = nullptr;
+  uint32_t control_freq = 100;
+};
+
 class ZenbeddedClientBase
 {
 public:
@@ -56,7 +63,9 @@ public:
 
 protected:
   /// @brief Initializes base buffers, transport layer, and background thread.
-  int init_base(uint32_t control_freq, size_t state_payload_size, size_t cmd_payload_size);
+  int init_base(
+    uint32_t control_freq, size_t state_payload_size, size_t cmd_payload_size,
+    const char * pub_topic = nullptr, const char * sub_topic = nullptr);
 
   /// @brief Direct slot access for state codec template initialization.
   uint8_t * get_state_buffer_slot(size_t slot_idx);
@@ -119,6 +128,15 @@ public:
     uint32_t control_freq, const StateInitParams & state_params = {},
     const CommandInitParams & cmd_params = {})
   {
+    ZenbeddedClientConfig cfg;
+    cfg.control_freq = control_freq;
+    return init(cfg, state_params, cmd_params);
+  }
+
+  int init(
+    const ZenbeddedClientConfig & cfg, const StateInitParams & state_params = {},
+    const CommandInitParams & cmd_params = {})
+  {
     if (initialized_)
     {
       return 0;
@@ -136,7 +154,7 @@ public:
     CommandCodec::init(cmd_ctx_, cmd_params, cmd_layout_scratch);
     size_t cmd_size = CommandCodec::payload_size(cmd_ctx_);
 
-    return init_base(control_freq, st_size, cmd_size);
+    return init_base(cfg.control_freq, st_size, cmd_size, cfg.pub_topic, cfg.sub_topic);
   }
 
   void write_state(const StateValue & value)

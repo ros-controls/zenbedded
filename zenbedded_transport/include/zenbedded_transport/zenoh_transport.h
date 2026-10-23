@@ -12,18 +12,48 @@ extern "C"
 {
 #endif
 
+  typedef enum zenbedded_mode_e
+  {
+    ZENBEDDED_MODE_CLIENT = 0,
+    ZENBEDDED_MODE_PEER = 1,
+  } zenbedded_mode_t;
+
+#if defined(CONFIG_ZENBEDDED_MODE_PEER)
+#define ZENBEDDED_DEFAULT_MODE ZENBEDDED_MODE_PEER
+#else
+#define ZENBEDDED_DEFAULT_MODE ZENBEDDED_MODE_CLIENT
+#endif
+
+#if defined(CONFIG_ZENBEDDED_ZENOH_LOCATOR)
+#define ZENBEDDED_DEFAULT_LOCATOR CONFIG_ZENBEDDED_ZENOH_LOCATOR
+#elif defined(CONFIG_ZENBEDDED_ZENOH_IP_PORT)
+#define ZENBEDDED_DEFAULT_LOCATOR CONFIG_ZENBEDDED_ZENOH_IP_PORT
+#else
+#define ZENBEDDED_DEFAULT_LOCATOR "127.0.0.1:7447"
+#endif
+
+  /**
+   * @brief Converts a string mode ("client" or "peer") to zenbedded_mode_t.
+   */
+  zenbedded_mode_t zenbedded_mode_from_str(const char * mode_str);
+
+  /**
+   * @brief Converts a zenbedded_mode_t to a string ("client" or "peer").
+   */
+  const char * zenbedded_mode_to_str(zenbedded_mode_t mode);
+
   /**
    * @brief Initializes the Zenbedded transport engine.
    *
    * @param domain_id ROS 2 Domain ID (Tier 1). Ignored in Tier 2.
    * @param node_name ROS 2 Node Name (Tier 1). Ignored in Tier 2.
-   * @param mode "client" or "peer".
+   * @param mode Operating mode (ZENBEDDED_MODE_CLIENT or ZENBEDDED_MODE_PEER).
    * @param locator Network endpoint (IP:PORT, e.g., "127.0.0.1:7447"). The transport layer
    * automatically prepends the protocol.
    * @return 0 on success, -1 on failure.
    */
   int zenbedded_transport_init(
-    uint32_t domain_id, const char * node_name, const char * mode, const char * locator);
+    uint32_t domain_id, const char * node_name, zenbedded_mode_t mode, const char * locator);
 
   /**
    * @brief Safely tears down the Zenoh session and un-declares Liveliness.
