@@ -40,7 +40,7 @@ the :ref:`docker_userdoc`):
 
    cd /zephyr_ws/demos/sine_wave/sine_wave_zephyr
    west build -p always -b esp32s3_devkitc/esp32s3/procpu
-   west flash --esp-device /dev/ttyUSB0
+   west flash
 
 .. note::
 
