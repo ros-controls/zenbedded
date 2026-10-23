@@ -21,4 +21,13 @@ config ZENOH_E2E_PERIOD_MS
     default 1000
     range 1 60000
 
+config ZENOH_E2E_DYNAMIC_PORT_OVERRIDE
+    bool "Enable runtime dynamic Zenoh port override from environment"
+    default n
+    depends on ARCH_POSIX
+    help
+      When enabled, reads ZENBEDDED_ZENOH_PORT at runtime via getenv() to override the
+      target endpoint.
+      When disabled (default), the static ENDPOINT is used.
+
 endmenu

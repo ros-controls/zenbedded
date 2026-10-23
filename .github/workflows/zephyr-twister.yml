@@ -39,6 +39,11 @@ jobs:
   twister:
     needs: docker
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [tests, demos]
+    name: twister (${{ matrix.suite }})
     permissions:
       contents: read
       packages: read
@@ -47,10 +52,33 @@ jobs:
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: "2G"
+      CCACHE_COMPRESS: "true"
+      CCACHE_COMPRESSLEVEL: "6"
+      CCACHE_IGNOREOPTIONS: "-specs=* --specs=*"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.suite }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ matrix.suite }}-${{ github.ref_name }}-
+            ccache-${{ matrix.suite }}-master-
+            ccache-${{ matrix.suite }}-
+            ccache-
+
+      - name: Zero ccache statistics
+        shell: bash
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache -z
 
       - name: Build Colcon Packages
         shell: bash
@@ -62,20 +90,18 @@ jobs:
           rosdep install --from-paths src --ignore-src -r -y
           colcon build
 
-      - name: Run twister (build + run native_sim)
+      - name: Run twister (${{ matrix.suite }})
         shell: bash
         run: |
           source /ros2_ws/install/setup.bash
           export ZEPHYR_BASE=/zephyr_ws/zephyr
           "$ZEPHYR_BASE/scripts/twister" \
-            --testsuite-root demos \
-            --testsuite-root tests \
+            --testsuite-root ${{ matrix.suite }} \
             --platform native_sim/native/64 \
             --platform esp32s3_devkitc/esp32s3/procpu \
             --inline-logs \
             -v \
-            --outdir twister-out \
-            --jobs 1
+            --outdir twister-out
 
       - name: Show twister run output
         if: always()
@@ -90,11 +116,19 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Print ccache statistics
+        if: always()
+        shell: bash
+        run: |
+          echo "::group::ccache statistics"
+          ccache -s -v
+          echo "::endgroup::"
+
       - name: Upload twister logs and configs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: twister-out
+          name: twister-out-${{ matrix.suite }}
           path: |
             twister-out/**/*.log
             twister-out/**/.config

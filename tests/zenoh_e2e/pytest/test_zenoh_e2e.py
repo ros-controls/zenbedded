@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import json
+import os
 import queue
 import time
 
@@ -48,9 +49,11 @@ def _wait_for_ready(dut: DeviceAdapter, ingress: bool, egress: bool, period_ms: 
     assert any(expected in line for line in lines), f"expected firmware ready line: {expected}"
 
 
-def _open_session():
+def _open_session(endpoint: str = None):
+    if endpoint is None:
+        endpoint = os.environ.get("ZENBEDDED_ZENOH_ENDPOINT", ROUTER_ENDPOINT)
     config = zenoh.Config()
-    config.insert_json5("connect/endpoints", json.dumps([ROUTER_ENDPOINT]))
+    config.insert_json5("connect/endpoints", json.dumps([endpoint]))
     return zenoh.open(config)
 
 

@@ -6,7 +6,6 @@ tests:
   sample.zenbedded.transport.build:
     build_only: true
     platform_allow:
-      - native_sim/native/64
       - esp32s3_devkitc/esp32s3/procpu
 
   sample.zenbedded.transport.asan:
@@ -21,6 +20,8 @@ tests:
     harness: pytest
     platform_allow:
       - native_sim/native/64
+    extra_configs:
+      - CONFIG_ZENBEDDED_TRANSPORT_DYNAMIC_PORT_OVERRIDE=y
     harness_config:
       pytest_dut_scope: function
       pytest_args: ["-o", "env=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"]
