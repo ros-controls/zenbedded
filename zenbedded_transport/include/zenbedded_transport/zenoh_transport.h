@@ -77,6 +77,22 @@ extern "C"
     const char * topic_name, const char * type_name, zenbedded_recv_cb_t callback,
     void * user_data);
 
+  /**
+   * @brief Undeclares a Publisher on the graph and releases its pool slot.
+   *
+   * @param pub The publisher handle to undeclare.
+   * @return 0 on success, negative error code on failure.
+   */
+  int zenbedded_transport_undeclare_publisher(zenbedded_pub_t pub);
+
+  /**
+   * @brief Undeclares a Subscriber on the graph and releases its pool slot.
+   *
+   * @param sub The subscriber handle to undeclare.
+   * @return 0 on success, negative error code on failure.
+   */
+  int zenbedded_transport_undeclare_subscriber(zenbedded_sub_t sub);
+
 #ifdef __cplusplus
 }
 #endif
