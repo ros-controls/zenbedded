@@ -42,11 +42,6 @@ extern "C"
    */
   void zenbedded_transport_destroy(void);
 
-  /**
-   @deprecated Network I/O is now handled autonomously by Zenoh-Pico background tasks
-   */
-  void zenbedded_transport_spin(void);
-
   typedef struct zenbedded_pub_s * zenbedded_pub_t;
   typedef struct zenbedded_sub_s * zenbedded_sub_t;
 

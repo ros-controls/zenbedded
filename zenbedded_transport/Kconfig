@@ -41,9 +41,6 @@ config ZENBEDDED_TIER_2
     select ZENOH_PICO_PUBLICATION
     select ZENOH_PICO_SUBSCRIPTION
 
-config ZENBEDDED_TIER_3
-    bool "Tier 3: Bit-Optimal Packed"
-
 endchoice
 
 # ==============================================================================
