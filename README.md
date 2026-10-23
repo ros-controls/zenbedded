@@ -32,7 +32,8 @@ CI lanes are planned after the first release.
 
 Platform | Status | Notes
 :------: | :----: | :----
-`esp32s3_devkitc/esp32s3/procpu` | ![passing](https://img.shields.io/badge/build-passing-brightgreen) | Reference target; built in CI and used by all demos
+`esp32s3` | ![passing](https://img.shields.io/badge/build-passing-brightgreen) | Reference target; built in CI and used by all demos
+`esp32 Classic` | ![Tested](https://img.shields.io/badge/build-passing-brightgreen) | Target; Manually tested and verified
 `native_sim/native/64` | ![passing](https://img.shields.io/badge/build-passing-brightgreen) | CI test target; no radio
 Other Zephyr boards | ![not tested](https://img.shields.io/badge/build-not%20tested-yellow) | Requires a network interface supported by zenoh-pico
 
@@ -73,6 +74,12 @@ Demos: [`inverted_pendulum`](demos/inverted_pendulum) and
 
 As an open-source project, we welcome each contributor, regardless of their background and experience. Pick a [PR](https://github.com/ros-controls/zenbedded/pulls) and review it, or [create your own](https://github.com/ros-controls/zenbedded/contribute)!
 If you are new to the project, please read the [contributing guide](https://control.ros.org/rolling/doc/contributing/contributing.html) for more information on how to get started.
+
+## References
+
+- [Zephyr RTOS](https://zephyrproject.org/) — [docs](https://docs.zephyrproject.org/), [GitHub](https://github.com/zephyrproject-rtos/zephyr)
+- [Zenoh](https://zenoh.io/) — [docs](https://zenoh.io/docs/overview/what-is-zenoh/), [zenoh-pico (embedded)](https://github.com/eclipse-zenoh/zenoh-pico)
+- [ros2_control](https://control.ros.org/)
 
 ## License
 
