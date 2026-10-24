@@ -30,7 +30,9 @@ LOG_MODULE_REGISTER(zenoh_transport, LOG_LEVEL_INF);
 static z_owned_session_t z_session;
 static uint32_t current_domain_id = 0;
 static char current_node_name[CONFIG_ZENBEDDED_MAX_NODE_NAME_LEN] = {0};
-static atomic_t transport_ref_count = ATOMIC_INIT(0);
+static K_MUTEX_DEFINE(transport_mutex);
+static uint32_t transport_ref_count = 0;
+static bool is_initialized = false;
 
 #define MAX_PUBLISHERS CONFIG_ZENBEDDED_MAX_PUBLISHERS
 #define MAX_SUBSCRIBERS CONFIG_ZENBEDDED_MAX_SUBSCRIBERS
@@ -147,9 +149,12 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
 int zenbedded_transport_init(
   uint32_t domain_id, const char * node_name, const char * mode, const char * locator)
 {
-  if (atomic_inc(&transport_ref_count) > 0)
+  k_mutex_lock(&transport_mutex, K_FOREVER);
+  if (is_initialized)
   {
-    LOG_DBG("Transport init ref count incremented: %d", (int)atomic_get(&transport_ref_count));
+    transport_ref_count++;
+    LOG_DBG("Transport init ref count incremented: %u", transport_ref_count);
+    k_mutex_unlock(&transport_mutex);
     return 0;
   }
 
@@ -195,7 +200,7 @@ int zenbedded_transport_init(
   if (z_open(&z_session, z_move(z_config), NULL) != Z_OK)
   {
     LOG_ERR("Failed to open Zenoh session!");
-    atomic_set(&transport_ref_count, 0);
+    k_mutex_unlock(&transport_mutex);
     return -1;
   }
   LOG_INF("Zenoh session opened successfully");
@@ -227,14 +232,25 @@ int zenbedded_transport_init(
     z_session_loan(&z_session), &node_lv_token, z_view_keyexpr_loan(&ke), NULL);
 #endif
 
+  is_initialized = true;
+  transport_ref_count = 1;
+  k_mutex_unlock(&transport_mutex);
+
   LOG_INF("Transport Initialized on Domain %u (Node: %s)", domain_id, current_node_name);
   return 0;
 }
 
 int zenbedded_transport_undeclare_publisher(zenbedded_pub_t pub)
 {
-  if (!pub || !pub->in_use)
+  if (!pub)
   {
+    return -EINVAL;
+  }
+
+  k_mutex_lock(&transport_mutex, K_FOREVER);
+  if (!is_initialized || !pub->in_use)
+  {
+    k_mutex_unlock(&transport_mutex);
     return -EINVAL;
   }
 
@@ -243,14 +259,23 @@ int zenbedded_transport_undeclare_publisher(zenbedded_pub_t pub)
 #endif
   z_undeclare_publisher(z_publisher_move(&pub->z_pub));
   pub->in_use = false;
-  LOG_INF("Undeclared Publisher: %s", pub->topic_keyexpr);
+  k_mutex_unlock(&transport_mutex);
+
+  LOG_DBG("Undeclared Publisher: %s", pub->topic_keyexpr);
   return 0;
 }
 
 int zenbedded_transport_undeclare_subscriber(zenbedded_sub_t sub)
 {
-  if (!sub || !sub->in_use)
+  if (!sub)
   {
+    return -EINVAL;
+  }
+
+  k_mutex_lock(&transport_mutex, K_FOREVER);
+  if (!is_initialized || !sub->in_use)
+  {
+    k_mutex_unlock(&transport_mutex);
     return -EINVAL;
   }
 
@@ -259,21 +284,27 @@ int zenbedded_transport_undeclare_subscriber(zenbedded_sub_t sub)
 #endif
   z_undeclare_subscriber(z_subscriber_move(&sub->z_sub));
   sub->in_use = false;
-  LOG_INF("Undeclared Subscriber: %s", sub->topic_keyexpr);
+  k_mutex_unlock(&transport_mutex);
+
+  LOG_DBG("Undeclared Subscriber: %s", sub->topic_keyexpr);
   return 0;
 }
 
 void zenbedded_transport_destroy(void)
 {
-  atomic_val_t prev = atomic_dec(&transport_ref_count);
-  if (prev <= 1)
+  k_mutex_lock(&transport_mutex, K_FOREVER);
+  if (!is_initialized || transport_ref_count == 0)
   {
-    atomic_set(&transport_ref_count, 0);
+    LOG_WRN("Transport destroy called without active references; ignoring");
+    k_mutex_unlock(&transport_mutex);
+    return;
   }
-  else
+
+  transport_ref_count--;
+  if (transport_ref_count > 0)
   {
-    LOG_DBG(
-      "Transport destroy: active references remaining (%d)", (int)atomic_get(&transport_ref_count));
+    LOG_DBG("Transport destroy: active references remaining (%u)", transport_ref_count);
+    k_mutex_unlock(&transport_mutex);
     return;
   }
 
@@ -300,6 +331,9 @@ void zenbedded_transport_destroy(void)
   zp_stop_lease_task(z_session_loan_mut(&z_session));
 
   z_close(z_session_loan_mut(&z_session), NULL);
+  is_initialized = false;
+  k_mutex_unlock(&transport_mutex);
+
   LOG_INF("Transport Destroyed Successfully");
 }
 
@@ -327,8 +361,10 @@ static void mangle_topic(char * dst, size_t dst_len, const char * src)
 zenbedded_pub_t zenbedded_transport_declare_publisher(
   const char * topic_name, const char * type_name)
 {
-  if (atomic_get(&transport_ref_count) <= 0)
+  k_mutex_lock(&transport_mutex, K_FOREVER);
+  if (!is_initialized)
   {
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
 
@@ -344,6 +380,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
   }
   if (!pub)
   {
+    k_mutex_unlock(&transport_mutex);
     LOG_ERR("Publisher pool exhausted! Max limit: %d", MAX_PUBLISHERS);
     return NULL;
   }
@@ -356,6 +393,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
   {
     LOG_ERR("Publisher declaration failed: type_name cannot be NULL in Tier 1");
     pub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
   const char * type_hash = zenbedded_get_rihs_hash(type_name);
@@ -364,6 +402,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
     LOG_ERR(
       "Publisher declaration failed: unknown message type '%s' (not in RIHS ledger)", type_name);
     pub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
   snprintf(
@@ -376,6 +415,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
     Z_OK)
   {
     pub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
 #elif defined(CONFIG_ZENBEDDED_TIER_2)
@@ -393,6 +433,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
       z_session_loan(&z_session), &pub->z_pub, z_view_keyexpr_loan(&ke), &pub_opts) != Z_OK)
   {
     pub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
 #endif
@@ -420,6 +461,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
     z_session_loan(&z_session), &pub->lv_token, z_view_keyexpr_loan(&lv_ke), NULL);
 #endif
 
+  k_mutex_unlock(&transport_mutex);
   LOG_INF("Declared Publisher: %s", pub->topic_keyexpr);
   return pub;
 }
@@ -468,8 +510,10 @@ int zenbedded_transport_publish(zenbedded_pub_t pub, const uint8_t * payload, si
 zenbedded_sub_t zenbedded_transport_declare_subscriber(
   const char * topic_name, const char * type_name, zenbedded_recv_cb_t callback, void * user_data)
 {
-  if (atomic_get(&transport_ref_count) <= 0)
+  k_mutex_lock(&transport_mutex, K_FOREVER);
+  if (!is_initialized)
   {
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
 
@@ -485,6 +529,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
   }
   if (!sub)
   {
+    k_mutex_unlock(&transport_mutex);
     LOG_ERR("Subscriber pool exhausted! Max limit: %d", MAX_SUBSCRIBERS);
     return NULL;
   }
@@ -499,6 +544,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
   {
     LOG_ERR("Subscriber declaration failed: type_name cannot be NULL in Tier 1");
     sub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
   const char * type_hash = zenbedded_get_rihs_hash(type_name);
@@ -507,6 +553,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
     LOG_ERR(
       "Subscriber declaration failed: unknown message type '%s' (not in RIHS ledger)", type_name);
     sub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     return NULL;
   }
   snprintf(
@@ -529,6 +576,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
       z_closure_sample_move(&sub_cb), NULL) != Z_OK)
   {
     sub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     LOG_ERR("Failed to declare Zenoh subscriber for %s", sub->topic_keyexpr);
     return NULL;
   }
@@ -539,6 +587,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
       z_closure_sample_move(&sub_cb), NULL) != Z_OK)
   {
     sub->in_use = false;
+    k_mutex_unlock(&transport_mutex);
     LOG_ERR("Failed to declare Zenoh subscriber for %s", sub->topic_keyexpr);
     return NULL;
   }
@@ -563,6 +612,7 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
     z_session_loan(&z_session), &sub->lv_token, z_view_keyexpr_loan(&lv_ke), NULL);
 #endif
 
+  k_mutex_unlock(&transport_mutex);
   LOG_INF("Declared Subscriber: %s", sub->topic_keyexpr);
   return sub;
 }
