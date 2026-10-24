@@ -337,11 +337,6 @@ void zenbedded_transport_destroy(void)
   LOG_INF("Transport Destroyed Successfully");
 }
 
-void zenbedded_transport_spin(void)
-{
-  // Deprecated: Network I/O handled autonomously by Zenoh-Pico background tasks
-}
-
 #if defined(CONFIG_ZENBEDDED_TIER_1)
 static void mangle_topic(char * dst, size_t dst_len, const char * src)
 {
