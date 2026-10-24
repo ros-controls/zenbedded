@@ -4,6 +4,13 @@ common:
   build_only: true
   tags: zenbedded
 tests:
-  sample.zenbedded.sine_wave_demo:
+  sample.zenbedded.sine_wave.wifi:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
+    extra_args:
+      - -DSNIPPET=wifi
+  sample.zenbedded.sine_wave.usb_cdc:
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+    extra_args:
+      - -DSNIPPET=cdc-ecm
