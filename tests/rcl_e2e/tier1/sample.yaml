@@ -3,12 +3,7 @@ sample:
 common:
   tags: zenoh
 tests:
-  sample.zenbedded.rcl_e2e_tier1.build:
-    build_only: true
-    platform_allow:
-      - esp32s3_devkitc/esp32s3/procpu
-
-  sample.zenbedded.rcl_e2e_tier1.native_sim:
+  sample.zenbedded.rcl_e2e_tier1:
     harness: pytest
     platform_allow:
       - native_sim/native/64
