@@ -4,6 +4,13 @@ common:
   build_only: true
   tags: zenoh
 tests:
-  sample.zenbedded.inverted_pendulum_tier1:
+  sample.zenbedded.inverted_pendulum_tier1.wifi:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
+    extra_args:
+      - -DSNIPPET=wifi
+  sample.zenbedded.inverted_pendulum_tier1.usb_cdc:
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+    extra_args:
+      - -DSNIPPET=cdc-ecm

@@ -68,9 +68,6 @@
 };
 
 
-&wifi {
-	status = "okay";
-};
 
 
 &timer0 {

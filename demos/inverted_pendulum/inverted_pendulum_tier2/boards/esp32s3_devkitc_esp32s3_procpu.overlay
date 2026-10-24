@@ -41,11 +41,6 @@
 		stepper-driver = <&tmc2209_driver>;
 	    counter = <&counter0>;
 	};
-
-	cdc_ecm_eth0: cdc_ecm_eth0 {
-		compatible = "zephyr,cdc-ecm-ethernet";
-		remote-mac-address = "00005E005301";
-	};
 };
 
 &i2s0_default {
@@ -102,9 +97,6 @@ i2s_led: &i2s0 {
 };
 
 
-&wifi {
-	status = "okay";
-};
 
 
 &timer0 {

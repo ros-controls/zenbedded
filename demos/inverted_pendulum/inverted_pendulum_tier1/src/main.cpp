@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include <errno.h>
-#include <esp_wifi.h>
 #include <math.h>
 #include <time.h>
 #include <zephyr/device.h>
@@ -25,7 +24,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/sntp.h>
-#include <zephyr/net/wifi_mgmt.h>
+#include <zenbedded_demo_net.hpp>
 #include "zenbedded_rcl/codecs.hpp"
 #include "zenbedded_rcl/zenbedded_client.hpp"
 
@@ -175,34 +174,11 @@ int main()
 
   LOG_INF("Starting Inverted Pendulum Tier1");
   net_if * iface = net_if_get_default();
-
-  LOG_INF("connecting to WiFi using stored credentials...");
-
-  uint32_t timer = k_uptime_get_32();
-  while (net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, nullptr, 0) != 0)
+  if (int net_err = zenbedded::demo::init_network(iface); net_err != 0)
   {
-    if (k_uptime_get_32() - timer > kWifiConnectTimeout)
-    {
-      LOG_ERR("Wifi Connection Timedout ...");
-      return -1;
-    }
-    LOG_ERR("WiFi connect-stored request failed... retrying...");
-    k_sleep(K_MSEC(200));
+    LOG_ERR("Failed to initialize network interface: %d", net_err);
+    return net_err;
   }
-
-  LOG_INF("Connected... Waiting for IPV4 address");
-  timer = k_uptime_get_32();
-  while (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) == nullptr)
-  {
-    if (k_uptime_get_32() - timer > kIpv4AcquireTimeout)
-    {
-      LOG_ERR(
-        "No IPV4 address within %u ms; check the stored WiFi credentials", kIpv4AcquireTimeout);
-      return -1;
-    }
-    k_sleep(K_MSEC(200));
-  }
-  LOG_INF("Got IPV4 address");
 
   // Only the JointState header stamp needs wall-clock time, so a failure here must not take the rig
   // down.
@@ -210,10 +186,6 @@ int main()
   {
     LOG_WRN("Continuing without NTP sync; state timestamps will be wrong");
   }
-
-  // Disable Wi-Fi power saving
-  esp_wifi_set_ps(WIFI_PS_NONE);
-  k_sleep(K_MSEC(200));
 
   static ZenbeddedClient<JointStateCodec, JointCommandCodec> client;
   const char * joint_names[] = {"stepper_motor", "magnetic_encoder"};
