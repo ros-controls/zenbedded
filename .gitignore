@@ -1,3 +1,8 @@
-build/
+build*/
 install/
 log/
+.ccache/
+__pycache__/
+twister-out*/
+.pytest_cache*/
+.idea/

@@ -11,6 +11,16 @@
 #include <zephyr/random/random.h>
 #include "zenbedded_transport/rihs_ledger.h"
 
+#if defined(CONFIG_ZENBEDDED_TRANSPORT_DYNAMIC_PORT_OVERRIDE)
+#if defined(CONFIG_ARCH_POSIX)
+#include <nsi_host_trampolines.h>
+#define GET_ENV_VAR(name) nsi_host_getenv(name)
+#else
+#include <stdlib.h>
+#define GET_ENV_VAR(name) getenv(name)
+#endif
+#endif
+
 #if defined(CONFIG_ZENBEDDED_TRANSPORT_LOG_LEVEL)
 LOG_MODULE_REGISTER(zenoh_transport, CONFIG_ZENBEDDED_TRANSPORT_LOG_LEVEL);
 #else
@@ -157,6 +167,16 @@ int zenbedded_transport_init(
   zp_config_insert(z_config_loan_mut(&z_config), Z_CONFIG_MODE_KEY, mode);
 
   static char full_locator[CONFIG_ZENBEDDED_MAX_LOCATOR_LEN];
+
+#if defined(CONFIG_ZENBEDDED_TRANSPORT_DYNAMIC_PORT_OVERRIDE)
+  const char * env_port = GET_ENV_VAR("ZENBEDDED_ZENOH_PORT");
+  static char dynamic_locator[24];
+  if (env_port != NULL && env_port[0] != '\0')
+  {
+    snprintf(dynamic_locator, sizeof(dynamic_locator), "127.0.0.1:%.5s", env_port);
+    locator = dynamic_locator;
+  }
+#endif
 
   if (locator && strlen(locator) > 0)
   {

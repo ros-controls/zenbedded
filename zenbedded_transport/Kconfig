@@ -105,6 +105,17 @@ config ZENBEDDED_ZENOH_IP_PORT
       For UDP Peer: Enter Multicast IP (e.g., 224.0.0.123:7447).
       The transport layer will automatically prepend "udp/" or "tcp/".
 
+config ZENBEDDED_TRANSPORT_DYNAMIC_PORT_OVERRIDE
+    bool "Enable runtime dynamic Zenoh port override from environment"
+    default n
+    depends on ARCH_POSIX
+    help
+      When enabled, the transport layer inspects the ZENBEDDED_ZENOH_PORT
+      environment variable at runtime using getenv() to override the target
+      port. This allows running multiple native_sim instances concurrently in
+      parallel test suites (e.g. Twister) without port collisions.
+      When disabled (default), the static compile-time Kconfig locator is used.
+
 config ZENBEDDED_DOMAIN_ID
     int "ROS 2 Domain ID"
     default 0

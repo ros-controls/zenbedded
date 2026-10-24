@@ -3,6 +3,8 @@ sample:
   name: zenoh e2e
 common:
   harness: pytest
+  extra_configs:
+    - CONFIG_ZENOH_E2E_DYNAMIC_PORT_OVERRIDE=y
   harness_config:
     pytest_dut_scope: function
     pytest_args:
