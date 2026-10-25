@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef DEMO_USBD_H_
-#define DEMO_USBD_H_
+#ifndef ZENBEDDED_DEMO__DEMO_USBD_H_
+#define ZENBEDDED_DEMO__DEMO_USBD_H_
 
 #ifdef __cplusplus
 extern "C"
@@ -36,4 +36,4 @@ extern "C"
 }
 #endif
 
-#endif  // DEMO_USBD_H_
+#endif  // ZENBEDDED_DEMO__DEMO_USBD_H_

@@ -49,23 +49,6 @@ choice ZENBEDDED_DEMO_COMM_INTERFACE
 
 endchoice
 
-# Backward-compatibility aliases for existing code checking legacy symbols
-config INVERTED_PENDULUM_COMM_USB_CDC
-    bool
-    default y if ZENBEDDED_DEMO_COMM_USB_CDC
-
-config INVERTED_PENDULUM_COMM_WIFI
-    bool
-    default y if ZENBEDDED_DEMO_COMM_WIFI
-
-config SINE_WAVE_COMM_USB_CDC
-    bool
-    default y if ZENBEDDED_DEMO_COMM_USB_CDC
-
-config SINE_WAVE_COMM_WIFI
-    bool
-    default y if ZENBEDDED_DEMO_COMM_WIFI
-
 # Conditional Wi-Fi enablement on ESP32
 config WIFI_ESP32
     default y if ZENBEDDED_DEMO_COMM_WIFI && SOC_FAMILY_ESPRESSIF_ESP32
@@ -124,12 +107,10 @@ if ZENBEDDED_DEMO_COMM_USB_CDC
 
     config ZENBEDDED_DEMO_USBD_MANUFACTURER
         string "USB device manufacturer string"
-        default SAMPLE_USBD_MANUFACTURER if SAMPLE_USBD_MANUFACTURER != ""
         default "Open Source Robotics Foundation"
 
     config ZENBEDDED_DEMO_USBD_PRODUCT
         string "USB device product string"
-        default SAMPLE_USBD_PRODUCT if SAMPLE_USBD_PRODUCT != ""
         default "Zenbedded Demo"
 
     config ZENBEDDED_DEMO_USBD_MAX_POWER
@@ -137,15 +118,6 @@ if ZENBEDDED_DEMO_COMM_USB_CDC
         default 125
         help
           Maximum power in 2mA units (125 = 250mA).
-
-    # Backward compatibility aliases
-    config SAMPLE_USBD_PRODUCT
-        string "USB product string (legacy alias)"
-        default ""
-
-    config SAMPLE_USBD_MANUFACTURER
-        string "USB manufacturer string (legacy alias)"
-        default ""
 
     config ZENBEDDED_DEMO_USB_CDC_DHCPV4_SERVER
         bool "Run DHCPv4 server on USB CDC interface"

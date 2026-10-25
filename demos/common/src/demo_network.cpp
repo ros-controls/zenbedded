@@ -14,19 +14,17 @@
 
 #include <errno.h>
 
-#include "zenbedded_demo_net.hpp"
+#include <zenbedded_demo/demo_net.hpp>
 
-#if defined(CONFIG_ZENBEDDED_DEMO_COMM_WIFI) || defined(CONFIG_INVERTED_PENDULUM_COMM_WIFI) || \
-  defined(CONFIG_SINE_WAVE_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_DEMO_COMM_WIFI)
 #if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
 #include <esp_wifi.h>
 #endif
 #include <zephyr/net/wifi_mgmt.h>
-#elif defined(CONFIG_ZENBEDDED_DEMO_COMM_USB_CDC) || \
-  defined(CONFIG_INVERTED_PENDULUM_COMM_USB_CDC) || defined(CONFIG_SINE_WAVE_COMM_USB_CDC)
+#elif defined(CONFIG_ZENBEDDED_DEMO_COMM_USB_CDC)
 #if defined(CONFIG_USB_DEVICE_STACK_NEXT)
+#include <zenbedded_demo/demo_usbd.h>
 #include <zephyr/usb/usbd.h>
-#include "demo_usbd.h"  // NOLINT(build/include_subdir)
 #endif
 #if defined(CONFIG_NET_CONFIG_SETTINGS)
 #include <zephyr/net/net_config.h>
@@ -52,10 +50,6 @@ constexpr uint32_t kIpv4AcquireTimeout = 30000;  // ms
 
 #if defined(CONFIG_ZENBEDDED_DEMO_USB_CDC_PEER_IPV4_ADDR)
 #define PEER_IPV4_ADDR CONFIG_ZENBEDDED_DEMO_USB_CDC_PEER_IPV4_ADDR
-#elif defined(CONFIG_INVERTED_PENDULUM_USB_CDC_PEER_IPV4_ADDR)
-#define PEER_IPV4_ADDR CONFIG_INVERTED_PENDULUM_USB_CDC_PEER_IPV4_ADDR
-#elif defined(CONFIG_SINE_WAVE_USB_CDC_PEER_IPV4_ADDR)
-#define PEER_IPV4_ADDR CONFIG_SINE_WAVE_USB_CDC_PEER_IPV4_ADDR
 #else
 #define PEER_IPV4_ADDR "192.0.2.1"
 #endif
@@ -67,8 +61,7 @@ int init_network(net_if * iface)
     iface = net_if_get_default();
   }
 
-#if defined(CONFIG_ZENBEDDED_DEMO_COMM_WIFI) || defined(CONFIG_INVERTED_PENDULUM_COMM_WIFI) || \
-  defined(CONFIG_SINE_WAVE_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_DEMO_COMM_WIFI)
   LOG_INF("Connecting to WiFi using stored credentials...");
   uint32_t timer = k_uptime_get_32();
   while (net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, nullptr, 0) != 0)
@@ -102,8 +95,7 @@ int init_network(net_if * iface)
 #endif
   return 0;
 
-#elif defined(CONFIG_ZENBEDDED_DEMO_COMM_USB_CDC) || \
-  defined(CONFIG_INVERTED_PENDULUM_COMM_USB_CDC) || defined(CONFIG_SINE_WAVE_COMM_USB_CDC)
+#elif defined(CONFIG_ZENBEDDED_DEMO_COMM_USB_CDC)
   LOG_INF("Initializing USB CDC network interface...");
 #if defined(CONFIG_USB_DEVICE_STACK_NEXT)
   usbd_context * demo_usbd = zenbedded_demo_usbd_init();

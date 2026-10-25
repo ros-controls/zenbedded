@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "demo_usbd.h"  // NOLINT(build/include_subdir)
+#include <zenbedded_demo/demo_usbd.h>
 
 #include <stdint.h>
 
