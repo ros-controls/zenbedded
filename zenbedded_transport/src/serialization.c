@@ -16,11 +16,16 @@
 
 #include <string.h>
 
+// Note: Layout writes assume a little-endian host, matching the CDR_LE encapsulation.
+
 #ifdef CONFIG_ZENBEDDED_TIER_1
 
 #define CDR_HEADER_SIZE 4
+// Note: Subtracts CDR_HEADER_SIZE to compute alignment relative to the encapsulated payload.
 #define ALIGN_UP(offset, alignment) \
   (CDR_HEADER_SIZE + ((((offset) - CDR_HEADER_SIZE) + (alignment) - 1) & ~((alignment) - 1)))
+
+static const uint8_t kCdrHeader[CDR_HEADER_SIZE] = {0x00, 0x01, 0x00, 0x00};
 
 void zcdr_init_joint_state(
   zcdr_joint_state_ctx_t * ctx, const char * frame_id, const char ** joint_names,
@@ -29,11 +34,8 @@ void zcdr_init_joint_state(
   ctx->num_joints = num_joints;
   size_t cursor = 0;
 
-  out_buffer[0] = 0x00;
-  out_buffer[1] = 0x01;
-  out_buffer[2] = 0x00;
-  out_buffer[3] = 0x00;
-  cursor += 4;
+  memcpy(&out_buffer[cursor], kCdrHeader, CDR_HEADER_SIZE);
+  cursor += CDR_HEADER_SIZE;
 
   ctx->offset_timestamp = cursor;
   cursor += 8;
@@ -157,11 +159,8 @@ void zcdr_init_joint_command(
   ctx->num_joints = num_joints;
   size_t cursor = 0;
 
-  out_buffer[0] = 0x00;
-  out_buffer[1] = 0x01;
-  out_buffer[2] = 0x00;
-  out_buffer[3] = 0x00;
-  cursor += 4;
+  memcpy(&out_buffer[cursor], kCdrHeader, CDR_HEADER_SIZE);
+  cursor += CDR_HEADER_SIZE;
 
   ctx->offset_timestamp = cursor;
   cursor += 8;

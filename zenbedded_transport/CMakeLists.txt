@@ -4,8 +4,10 @@ zephyr_library()
 zephyr_include_directories(include)
 
 zephyr_library_sources(src/zenoh_transport.c)
+# 1-second timeout scoped to the library.
 zephyr_library_compile_definitions(Z_CONFIG_SOCKET_TIMEOUT=1)
 
+# Global Zephyr definitions: 60s lease, enable unstable Pico APIs.
 zephyr_compile_definitions(
   Z_FEATURE_UNSTABLE_API=1
   Z_TRANSPORT_LEASE=60000

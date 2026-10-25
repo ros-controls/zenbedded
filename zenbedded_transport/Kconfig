@@ -5,8 +5,8 @@ config ZENBEDDED_TRANSPORT_LOG_LEVEL
     default 2
     depends on LOG
     help
-      Set to 4 (Debug) to expose raw Zenoh-pico wire-traces and KeepAlive logs
-      during transport layer debugging. Keeps the user console clean by default.
+      Set to 4 (Debug) to expose raw Zenoh-pico wire-traces and detailed session
+      lifecycle events during transport layer debugging. Keeps the user console clean by default.
 
 choice ZENBEDDED_TRANSPORT_TIER
     prompt "Integration Tier"
@@ -83,7 +83,7 @@ config ZENBEDDED_QOS_BEST_EFFORT
       Uses UDP transport.
       If Client: Uses UDP Unicast.
       If Peer: Uses UDP Multicast.
-      Note: Default enforces Zenoh Best-Effort & Congestion Drop.
+      Note: This selects the network link layer protocol.
 
 config ZENBEDDED_QOS_RELIABLE
     bool "Reliable (TCP)"
@@ -92,7 +92,7 @@ config ZENBEDDED_QOS_RELIABLE
     help
       Uses TCP transport.
       Valid for both Client (Unicast) and Peer (P2P Unicast).
-      Provides OS-level retries. Default enforces Congestion Drop to protect 500Hz loops.
+      This selects the network link layer protocol.
 
 endchoice
 

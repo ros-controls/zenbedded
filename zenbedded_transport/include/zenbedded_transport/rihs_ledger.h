@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// zenbedded_transport/include/zenbedded_transport/rihs_ledger.h
 #ifndef ZENBEDDED_TRANSPORT__RIHS_LEDGER_H_
 #define ZENBEDDED_TRANSPORT__RIHS_LEDGER_H_
 
@@ -25,6 +24,8 @@ typedef struct
   const char * rihs_hash;
 } zenbedded_rihs_mapping_t;
 
+// Hardcoded ROS 2 distro type hashes. Must match host's rmw_zenoh. Regenerate when interfaces
+// change.
 static const zenbedded_rihs_mapping_t RIHS_LEDGER[] = {
   {"sensor_msgs::msg::dds_::JointState_",
    "RIHS01_a13ee3a330e346c9d87b5aa18d24e11690752bd33a0350f11c5882bc9179260e"},

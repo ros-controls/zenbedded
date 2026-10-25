@@ -1,5 +1,16 @@
 // Copyright 2026 Open Source Robotics Foundation, Inc.
-// Licensed under the Apache License, Version 2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "zenbedded_transport/zenoh_transport.h"
 #include <stdio.h>
@@ -36,7 +47,7 @@ static bool is_initialized = false;
 
 #define MAX_PUBLISHERS CONFIG_ZENBEDDED_MAX_PUBLISHERS
 #define MAX_SUBSCRIBERS CONFIG_ZENBEDDED_MAX_SUBSCRIBERS
-#define RMW_GID_SIZE 16
+#define RMW_GID_SIZE 16  // Standard ROS 2 GID byte length.
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
 /* ROS 2 / rmw_zenoh Key Expression and Liveliness Overhead Constants */
@@ -122,6 +133,10 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
   static uint8_t rx_buf[CONFIG_ZENBEDDED_TIER1_MAX_RX_BUFFER_SIZE];
+#elif defined(CONFIG_ZENBEDDED_TIER_2)
+  static uint8_t rx_buf[CONFIG_ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE];
+#endif
+
   if (len == 0 || len > sizeof(rx_buf))
   {
     return;
@@ -130,20 +145,6 @@ static void internal_sub_handler(z_loaned_sample_t * sample, void * arg)
   z_bytes_reader_t reader = z_bytes_get_reader(payload);
   z_bytes_reader_read(&reader, rx_buf, len);
   sub->user_cb(rx_buf, len, sub->user_data);
-
-#elif defined(CONFIG_ZENBEDDED_TIER_2)
-  if (len == 0 || len > CONFIG_ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE)
-  {
-    return;
-  }
-
-  static uint8_t t2_rx_buf[CONFIG_ZENBEDDED_TIER2_MAX_RX_BUFFER_SIZE];
-
-  z_bytes_reader_t reader = z_bytes_get_reader(payload);
-  z_bytes_reader_read(&reader, t2_rx_buf, len);
-
-  sub->user_cb(t2_rx_buf, len, sub->user_data);
-#endif
 }
 
 int zenbedded_transport_init(
@@ -338,6 +339,7 @@ void zenbedded_transport_destroy(void)
 }
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
+// Escapes '/' to '%' and strips leading slash to match rmw_zenoh keyexpr conventions.
 static void mangle_topic(char * dst, size_t dst_len, const char * src)
 {
   if (src[0] == '/')
@@ -499,7 +501,7 @@ int zenbedded_transport_publish(zenbedded_pub_t pub, const uint8_t * payload, si
            : -1;
 #endif
 
-  return -1;
+  return -1;  // Unreachable in valid configs; satisfies static analysis.
 }
 
 zenbedded_sub_t zenbedded_transport_declare_subscriber(
@@ -564,7 +566,6 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
   z_owned_closure_sample_t sub_cb;
   z_closure_sample(&sub_cb, internal_sub_handler, NULL, sub);
 
-#if defined(CONFIG_ZENBEDDED_TIER_1)
   if (
     z_declare_subscriber(
       z_session_loan(&z_session), &sub->z_sub, z_view_keyexpr_loan(&ke),
@@ -575,18 +576,6 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
     LOG_ERR("Failed to declare Zenoh subscriber for %s", sub->topic_keyexpr);
     return NULL;
   }
-#elif defined(CONFIG_ZENBEDDED_TIER_2)
-  if (
-    z_declare_subscriber(
-      z_session_loan(&z_session), &sub->z_sub, z_view_keyexpr_loan(&ke),
-      z_closure_sample_move(&sub_cb), NULL) != Z_OK)
-  {
-    sub->in_use = false;
-    k_mutex_unlock(&transport_mutex);
-    LOG_ERR("Failed to declare Zenoh subscriber for %s", sub->topic_keyexpr);
-    return NULL;
-  }
-#endif
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
   char mangled_topic[CONFIG_ZENBEDDED_MAX_TOPIC_NAME_LEN];

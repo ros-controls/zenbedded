@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Parses a YAML schema (state_interfaces: <comp>: {<field>: <type>}) to generate C headers. Supported TYPE_MAP scalars: float32, float64, double, int32, uint64, int16, uint8."""
+
 import sys
 import yaml
 import argparse
