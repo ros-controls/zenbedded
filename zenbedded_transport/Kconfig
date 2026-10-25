@@ -204,6 +204,9 @@ config ZENBEDDED_TIER2_SCHEMA_PATH
 # SYSTEM DEFAULTS
 # ==============================================================================
 
+# Note: The defaults below apply Zephyr-wide memory, stack, and buffer overrides
+# to the parent application to ensure reliable transport operation.
+
 config NET_BUF_DATA_SIZE
     default 512 if ZENBEDDED_TIER_1
     default 256 if ZENBEDDED_TIER_2

@@ -20,7 +20,8 @@ endif()
 if(CONFIG_ZENBEDDED_TIER_2)
   set(GEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_tier2_payload.py")
 
-  if(DEFINED CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH AND NOT "${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}" STREQUAL "")
+  if(DEFINED CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH AND NOT
+  "${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}" STREQUAL "")
     set(SCHEMA_FILE "${APPLICATION_SOURCE_DIR}/${CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH}")
   elseif(EXISTS "${APPLICATION_SOURCE_DIR}/config/interface_schema.yaml")
     set(SCHEMA_FILE "${APPLICATION_SOURCE_DIR}/config/interface_schema.yaml")
@@ -48,7 +49,9 @@ if(CONFIG_ZENBEDDED_TIER_2)
     add_dependencies(zephyr_interface zenbedded_tier2_header_gen)
     zephyr_include_directories("${ZEPHYR_BINARY_DIR}/include")
   else()
-    message(FATAL_ERROR "[zenbedded] CONFIG_ZENBEDDED_TIER_2=y but schema YAML not found! "
-                          "Place 'interface_schema.yaml' in app root/config or set CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH.")
+    message(FATAL_ERROR
+      "[zenbedded] CONFIG_ZENBEDDED_TIER_2=y but schema YAML not found! "
+      "Place 'interface_schema.yaml' in app root/config or set CONFIG_ZENBEDDED_TIER2_SCHEMA_PATH."
+    )
   endif()
 endif()

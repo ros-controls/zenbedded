@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "zenbedded_transport/zenoh_transport.h"
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 #include <zenoh-pico.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/random/random.h>
 #include "zenbedded_transport/rihs_ledger.h"
+
+#if defined(CONFIG_ZENBEDDED_TIER_1)
+#include <time.h>
+#include <zephyr/random/random.h>
+#endif
 
 #if defined(CONFIG_ZENBEDDED_TRANSPORT_DYNAMIC_PORT_OVERRIDE)
 #if defined(CONFIG_ARCH_POSIX)
@@ -35,7 +37,7 @@
 #if defined(CONFIG_ZENBEDDED_TRANSPORT_LOG_LEVEL)
 LOG_MODULE_REGISTER(zenoh_transport, CONFIG_ZENBEDDED_TRANSPORT_LOG_LEVEL);
 #else
-LOG_MODULE_REGISTER(zenoh_transport, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(zenoh_transport, LOG_LEVEL_WRN);
 #endif
 
 static z_owned_session_t z_session;
@@ -195,12 +197,12 @@ int zenbedded_transport_init(
 
     zp_config_insert(z_config_loan_mut(&z_config), key, full_locator);
 
-    LOG_INF("Transport Locator mapped to: %s (Key: %d)", full_locator, key);
+    LOG_INF("Transport locator mapped to: %s (Key: %d)", full_locator, key);
   }
 
   if (z_open(&z_session, z_move(z_config), NULL) != Z_OK)
   {
-    LOG_ERR("Failed to open Zenoh session!");
+    LOG_ERR("Failed to open zenoh session!");
     k_mutex_unlock(&transport_mutex);
     return -1;
   }
@@ -214,7 +216,7 @@ int zenbedded_transport_init(
   zp_task_lease_options_default(&lease_opts);
   zp_start_lease_task(z_session_loan_mut(&z_session), &lease_opts);
 
-#ifdef CONFIG_ZENBEDDED_TIER_1
+#if defined CONFIG_ZENBEDDED_TIER_1
   z_id_t zid = z_info_zid(z_session_loan(&z_session));
 
   snprintf(
@@ -224,7 +226,7 @@ int zenbedded_transport_init(
     zid.id[7], zid.id[8], zid.id[9], zid.id[10], zid.id[11], zid.id[12], zid.id[13], zid.id[14],
     zid.id[15], current_node_name);
 
-  LOG_DBG("[WIRE-TRACE] Transmitting Node Liveliness Declaration:");
+  LOG_DBG("[WIRE-TRACE] Transmitting node liveliness declaration:");
   LOG_DBG("[WIRE-TRACE] %s", node_lv_str);
 
   z_view_keyexpr_t ke;
@@ -237,7 +239,7 @@ int zenbedded_transport_init(
   transport_ref_count = 1;
   k_mutex_unlock(&transport_mutex);
 
-  LOG_INF("Transport Initialized on Domain %u (Node: %s)", domain_id, current_node_name);
+  LOG_INF("Transport initialized on domain %u (Node: %s)", domain_id, current_node_name);
   return 0;
 }
 
@@ -262,7 +264,7 @@ int zenbedded_transport_undeclare_publisher(zenbedded_pub_t pub)
   pub->in_use = false;
   k_mutex_unlock(&transport_mutex);
 
-  LOG_DBG("Undeclared Publisher: %s", pub->topic_keyexpr);
+  LOG_DBG("Undeclared publisher: %s", pub->topic_keyexpr);
   return 0;
 }
 
@@ -287,7 +289,7 @@ int zenbedded_transport_undeclare_subscriber(zenbedded_sub_t sub)
   sub->in_use = false;
   k_mutex_unlock(&transport_mutex);
 
-  LOG_DBG("Undeclared Subscriber: %s", sub->topic_keyexpr);
+  LOG_DBG("Undeclared subscriber: %s", sub->topic_keyexpr);
   return 0;
 }
 
@@ -335,7 +337,7 @@ void zenbedded_transport_destroy(void)
   is_initialized = false;
   k_mutex_unlock(&transport_mutex);
 
-  LOG_INF("Transport Destroyed Successfully");
+  LOG_INF("Transport destroyed successfully");
 }
 
 #if defined(CONFIG_ZENBEDDED_TIER_1)
@@ -459,7 +461,7 @@ zenbedded_pub_t zenbedded_transport_declare_publisher(
 #endif
 
   k_mutex_unlock(&transport_mutex);
-  LOG_INF("Declared Publisher: %s", pub->topic_keyexpr);
+  LOG_INF("Declared publisher: %s", pub->topic_keyexpr);
   return pub;
 }
 
@@ -597,6 +599,6 @@ zenbedded_sub_t zenbedded_transport_declare_subscriber(
 #endif
 
   k_mutex_unlock(&transport_mutex);
-  LOG_INF("Declared Subscriber: %s", sub->topic_keyexpr);
+  LOG_INF("Declared subscriber: %s", sub->topic_keyexpr);
   return sub;
 }
