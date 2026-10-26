@@ -45,6 +45,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include <cctype>
+#include <cstdio>
+#include <cstring>
+
 LOG_MODULE_REGISTER(zenbedded_net, LOG_LEVEL_INF);
 
 namespace zenbedded::common
@@ -215,31 +219,116 @@ int init_usbd(net_if * iface)
 
 int init_network()
 {
-  int ret = 0;
+  int usb_ret = -ENOTSUP;
+  int wifi_ret = -ENOTSUP;
 
 #if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
-  ret = init_usbd();
-  if (ret != 0)
+  usb_ret = init_usbd();
+  if (usb_ret != 0)
   {
-    LOG_ERR("Failed to initialize USB CDC interface: %d", ret);
-    return ret;
+    LOG_WRN("USB CDC interface not ready or timed out: %d", usb_ret);
   }
 #endif
 
 #if defined(CONFIG_ZENBEDDED_COMM_WIFI)
-  ret = init_wifi();
-  if (ret != 0)
+  wifi_ret = init_wifi();
+  if (wifi_ret != 0)
   {
-    LOG_ERR("Failed to initialize WiFi interface: %d", ret);
-    return ret;
+    LOG_WRN("Wi-Fi interface not ready or timed out: %d", wifi_ret);
   }
 #endif
 
-#if !defined(CONFIG_ZENBEDDED_COMM_USB_CDC) && !defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC) && defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  if (usb_ret == 0 || wifi_ret == 0)
+  {
+    LOG_INF(
+      "Network initialized (USB: %s, Wi-Fi: %s)", usb_ret == 0 ? "READY" : "DOWN",
+      wifi_ret == 0 ? "READY" : "DOWN");
+    return 0;
+  }
+  return -ENETDOWN;
+#elif defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+  return usb_ret;
+#elif defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  return wifi_ret;
+#else
   LOG_WRN("No network transport enabled in Kconfig");
+  return 0;
+#endif
+}
+
+bool is_usbd_ready()
+{
+#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+  struct net_if * iface = nullptr;
+#if defined(CONFIG_USBD_CDC_ECM_CLASS)
+  const struct device * dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(cdc_ecm_eth0));
+  if (dev != nullptr && device_is_ready(dev))
+  {
+    iface = net_if_lookup_by_dev(dev);
+  }
+#endif
+#if !defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  if (iface == nullptr)
+  {
+    iface = net_if_get_default();
+  }
+#endif
+  return iface != nullptr && net_if_is_up(iface) &&
+         (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) != nullptr);
+#else
+  return false;
+#endif
+}
+
+bool is_wifi_ready()
+{
+#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  struct net_if * iface = net_if_get_wifi_sta();
+#if !defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+  if (iface == nullptr)
+  {
+    iface = net_if_get_default();
+  }
+#endif
+  return iface != nullptr && net_if_is_up(iface) &&
+         (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) != nullptr);
+#else
+  return false;
+#endif
+}
+
+int get_usb_peer_locator(const char * target_locator, char * out_usb_locator, size_t out_len)
+{
+  if (out_usb_locator == nullptr || out_len == 0)
+  {
+    return -EINVAL;
+  }
+
+  const char * port = "7447";
+  if (target_locator != nullptr)
+  {
+    const char * colon = strrchr(target_locator, ':');
+    if (
+      colon != nullptr && *(colon + 1) != '\0' && isdigit(static_cast<unsigned char>(*(colon + 1))))
+    {
+      port = colon + 1;
+    }
+  }
+
+#if defined(CONFIG_ZENBEDDED_USB_CDC_PEER_IPV4_ADDR)
+  const char * peer_ip = CONFIG_ZENBEDDED_USB_CDC_PEER_IPV4_ADDR;
+#else
+  const char * peer_ip = "192.0.2.1";
 #endif
 
-  return ret;
+  int written = snprintf(out_usb_locator, out_len, "%s:%s", peer_ip, port);
+  if (written < 0 || static_cast<size_t>(written) >= out_len)
+  {
+    return -ENOSPC;
+  }
+
+  return 0;
 }
 
 }  // namespace zenbedded::common
