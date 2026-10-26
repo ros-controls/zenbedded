@@ -23,6 +23,14 @@ extern "C"
 {
 #endif
 
+#if defined(CONFIG_ZENBEDDED_ZENOH_LOCATOR)
+#define ZENBEDDED_DEFAULT_LOCATOR CONFIG_ZENBEDDED_ZENOH_LOCATOR
+#elif defined(CONFIG_ZENBEDDED_ZENOH_IP_PORT)
+#define ZENBEDDED_DEFAULT_LOCATOR CONFIG_ZENBEDDED_ZENOH_IP_PORT
+#else
+#define ZENBEDDED_DEFAULT_LOCATOR "127.0.0.1:7447"
+#endif
+
   /**
    * @brief Initializes the Zenbedded transport engine.
    *

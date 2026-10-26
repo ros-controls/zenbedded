@@ -18,10 +18,10 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/net/net_if.h>
 #include <cmath>
-#include <zenbedded_demo_net.hpp>
+#include <zenbedded_common/network.hpp>
 #include <zenbedded_rcl/zenbedded_client.hpp>
 
-LOG_MODULE_REGISTER(sine_wave_zephyr, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(sine_wave_tier2, LOG_LEVEL_INF);
 
 using SineWaveClient = ZenbeddedClient<RawCodec<zenbedded_state_t>, RawCodec<zenbedded_command_t>>;
 
@@ -31,9 +31,8 @@ uint32_t loop_freq = 100;     // hz
 
 int main()
 {
-  LOG_INF("starting Sine Wave Zephyr App");
-  net_if * iface = net_if_get_default();
-  if (int net_err = zenbedded::demo::init_network(iface); net_err != 0)
+  LOG_INF("Starting Sine Wave Tier 2 App");
+  if (int net_err = zenbedded::common::init_network(); net_err != 0)
   {
     LOG_ERR("Failed to initialize network interface: %d", net_err);
     return net_err;
@@ -73,7 +72,7 @@ int main()
 
     if (++cnt == 500)
     {
-      LOG_INF("Running...");
+      LOG_INF("Running... pos: %.3f", state.sine_wave_position);
       cnt = 0;
     }
 
