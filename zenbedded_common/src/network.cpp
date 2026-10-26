@@ -12,18 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <zenbedded_common/network.hpp>
+
 #include <errno.h>
 
-#include <zenbedded_demo/demo_net.hpp>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 
-#if defined(CONFIG_ZENBEDDED_DEMO_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
 #if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
 #include <esp_wifi.h>
 #endif
 #include <zephyr/net/wifi_mgmt.h>
-#elif defined(CONFIG_ZENBEDDED_DEMO_COMM_USB_CDC)
+#endif
+
+#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
 #if defined(CONFIG_USB_DEVICE_STACK_NEXT)
-#include <zenbedded_demo/demo_usbd.h>
+#include <zenbedded_common/usbd.h>
 #include <zephyr/usb/usbd.h>
 #endif
 #if defined(CONFIG_NET_CONFIG_SETTINGS)
@@ -40,28 +45,26 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(zenbedded_demo_net, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(zenbedded_net, LOG_LEVEL_INF);
 
-namespace zenbedded::demo
+namespace zenbedded::common
 {
 
 constexpr uint32_t kWifiConnectTimeout = 15000;  // ms
 constexpr uint32_t kIpv4AcquireTimeout = 30000;  // ms
 
-#if defined(CONFIG_ZENBEDDED_DEMO_USB_CDC_PEER_IPV4_ADDR)
-#define PEER_IPV4_ADDR CONFIG_ZENBEDDED_DEMO_USB_CDC_PEER_IPV4_ADDR
-#else
-#define PEER_IPV4_ADDR "192.0.2.1"
-#endif
-
-int init_network(net_if * iface)
+#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+int init_wifi(net_if * iface)
 {
   if (iface == nullptr)
   {
-    iface = net_if_get_default();
+    iface = net_if_get_wifi_sta();
+    if (iface == nullptr)
+    {
+      iface = net_if_get_default();
+    }
   }
 
-#if defined(CONFIG_ZENBEDDED_DEMO_COMM_WIFI)
   LOG_INF("Connecting to WiFi using stored credentials...");
   uint32_t timer = k_uptime_get_32();
   while (net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, nullptr, 0) != 0)
@@ -75,14 +78,14 @@ int init_network(net_if * iface)
     k_sleep(K_MSEC(500));
   }
 
-  LOG_INF("Connected... Waiting for IPv4 address");
+  LOG_INF("Connected... Waiting for IPv4 address on WiFi interface");
   timer = k_uptime_get_32();
   while (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) == nullptr)
   {
     if (k_uptime_get_32() - timer > kIpv4AcquireTimeout)
     {
       LOG_ERR(
-        "No IPv4 address within %u ms; check the stored WiFi credentials", kIpv4AcquireTimeout);
+        "No IPv4 address on WiFi within %u ms; check stored credentials", kIpv4AcquireTimeout);
       return -ETIMEDOUT;
     }
     k_sleep(K_MSEC(200));
@@ -93,25 +96,52 @@ int init_network(net_if * iface)
   esp_wifi_set_ps(WIFI_PS_NONE);
   k_sleep(K_MSEC(200));
 #endif
-  return 0;
 
-#elif defined(CONFIG_ZENBEDDED_DEMO_COMM_USB_CDC)
+  return 0;
+}
+#else
+int init_wifi(net_if * iface)
+{
+  (void)iface;
+  LOG_WRN("Wi-Fi transport not enabled in Kconfig");
+  return -ENOTSUP;
+}
+#endif  // CONFIG_ZENBEDDED_COMM_WIFI
+
+#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+int init_usbd(net_if * iface)
+{
   LOG_INF("Initializing USB CDC network interface...");
 #if defined(CONFIG_USB_DEVICE_STACK_NEXT)
-  usbd_context * demo_usbd = zenbedded_demo_usbd_init();
-  if (demo_usbd == nullptr)
+  usbd_context * usbd_ctx = zenbedded_usbd_init();
+  if (usbd_ctx == nullptr)
   {
     LOG_ERR("Failed to initialize USB device context");
     return -ENODEV;
   }
 
-  int usb_err = usbd_enable(demo_usbd);
+  int usb_err = usbd_enable(usbd_ctx);
   if (usb_err != 0)
   {
     LOG_ERR("Failed to enable USB device: %d", usb_err);
     return usb_err;
   }
   LOG_INF("USB device initialized and enabled");
+
+  if (iface == nullptr)
+  {
+#if defined(CONFIG_USBD_CDC_ECM_CLASS)
+    const struct device * dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(cdc_ecm_eth0));
+    if (dev != nullptr && device_is_ready(dev))
+    {
+      iface = net_if_lookup_by_dev(dev);
+    }
+#endif
+    if (iface == nullptr)
+    {
+      iface = net_if_get_default();
+    }
+  }
 
 #if defined(CONFIG_NET_CONFIG_SETTINGS)
   (void)net_config_init_app(nullptr, "Initializing USB network");
@@ -135,7 +165,7 @@ int init_network(net_if * iface)
 
 #if defined(CONFIG_NET_DHCPV4_SERVER)
   in_addr pool_addr;
-  if (net_addr_pton(AF_INET, PEER_IPV4_ADDR, &pool_addr) == 0)
+  if (net_addr_pton(AF_INET, CONFIG_ZENBEDDED_USB_CDC_PEER_IPV4_ADDR, &pool_addr) == 0)
   {
     int srv_err = net_dhcpv4_server_start(iface, &pool_addr);
     if (srv_err != 0)
@@ -144,7 +174,7 @@ int init_network(net_if * iface)
     }
     else
     {
-      LOG_INF("DHCPv4 server started leasing %s to host", PEER_IPV4_ADDR);
+      LOG_INF("DHCPv4 server started leasing %s to host", CONFIG_ZENBEDDED_USB_CDC_PEER_IPV4_ADDR);
     }
   }
 
@@ -173,10 +203,43 @@ int init_network(net_if * iface)
 #endif
 
   return 0;
+}
 #else
-  LOG_WRN("No network transport enabled in Kconfig");
-  return 0;
+int init_usbd(net_if * iface)
+{
+  (void)iface;
+  LOG_WRN("USB CDC transport not enabled in Kconfig");
+  return -ENOTSUP;
+}
+#endif  // CONFIG_ZENBEDDED_COMM_USB_CDC
+
+int init_network()
+{
+  int ret = 0;
+
+#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+  ret = init_usbd();
+  if (ret != 0)
+  {
+    LOG_ERR("Failed to initialize USB CDC interface: %d", ret);
+    return ret;
+  }
 #endif
+
+#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  ret = init_wifi();
+  if (ret != 0)
+  {
+    LOG_ERR("Failed to initialize WiFi interface: %d", ret);
+    return ret;
+  }
+#endif
+
+#if !defined(CONFIG_ZENBEDDED_COMM_USB_CDC) && !defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  LOG_WRN("No network transport enabled in Kconfig");
+#endif
+
+  return ret;
 }
 
-}  // namespace zenbedded::demo
+}  // namespace zenbedded::common

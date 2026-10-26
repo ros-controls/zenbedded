@@ -12,9 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/ {
-	cdc_ecm_eth0: cdc_ecm_eth0 {
-		compatible = "zephyr,cdc-ecm-ethernet";
-		remote-mac-address = "00005E005301";
-	};
-};
+#ifndef ZENBEDDED_COMMON__USBD_H_
+#define ZENBEDDED_COMMON__USBD_H_
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+#include <zephyr/usb/usbd.h>
+
+  /**
+   * @brief Initialize and configure the default Zenbedded USB device context.
+   *
+   * Sets up device descriptors, manufacturer/product strings, FS/HS configurations,
+   * and registers all enabled USB classes (e.g. CDC ECM).
+   *
+   * @return Initialized usbd_context pointer on success, NULL on failure.
+   */
+  struct usbd_context * zenbedded_usbd_init(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // ZENBEDDED_COMMON__USBD_H_

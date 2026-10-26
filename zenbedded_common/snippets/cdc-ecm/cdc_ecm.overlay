@@ -1,0 +1,8 @@
+/ {
+};
+
+&zephyr_udc0 {
+	cdc_ecm_eth0: cdc_ecm_eth0 {
+		compatible = "zephyr,cdc-ecm-ethernet";
+	};
+};

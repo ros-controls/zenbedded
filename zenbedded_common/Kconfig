@@ -1,0 +1,128 @@
+# Copyright 2026 Open Source Robotics Foundation, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+menuconfig ZENBEDDED_COMMON
+    bool "Zenbedded Common Library"
+    default y
+    help
+      Common network bringup and USB utilities for Zenbedded applications.
+
+if ZENBEDDED_COMMON
+
+config ZENBEDDED_COMM_USB_CDC
+    bool "USB CDC (Ethernet) Interface"
+    default n
+    select USB_DEVICE_STACK_NEXT
+    select NET_L2_ETHERNET
+    select USBD_CDC_ECM_CLASS
+    help
+      Connect over USB CDC ECM (Ethernet emulation) for wired communication.
+
+config ZENBEDDED_COMM_WIFI
+    bool "Wi-Fi Interface"
+    default n
+    select WIFI
+    select WIFI_NM
+    select WIFI_CREDENTIALS
+    select WIFI_CREDENTIALS_CONNECT_STORED
+    select NET_L2_WIFI_SHELL
+    select WIFI_CREDENTIALS_SHELL
+    select NET_DHCPV4
+    help
+      Connect over 802.11 Wi-Fi station mode using stored credentials.
+
+config NET_MAX_CONTEXTS
+    default 10 if ZENBEDDED_COMM_USB_CDC && ZENBEDDED_COMM_WIFI
+
+if ZENBEDDED_COMM_USB_CDC
+
+    config ZENBEDDED_USB_CDC_STATIC_IP
+        bool "Configure static IPv4 address on USB CDC interface"
+        default y
+        select NET_CONFIG_SETTINGS
+        help
+          Configure deterministic static IPv4 address for the USB CDC interface.
+
+    config ZENBEDDED_USB_CDC_MY_IPV4_ADDR
+        string "Device USB CDC IPv4 address"
+        depends on ZENBEDDED_USB_CDC_STATIC_IP
+        default "192.0.2.2"
+
+    config ZENBEDDED_USB_CDC_PEER_IPV4_ADDR
+        string "Host PC USB CDC IPv4 address"
+        depends on ZENBEDDED_USB_CDC_STATIC_IP
+        default "192.0.2.1"
+
+    config ZENBEDDED_USB_CDC_NETMASK
+        string "Device USB CDC IPv4 Netmask"
+        depends on ZENBEDDED_USB_CDC_STATIC_IP
+        default "255.255.255.0"
+
+    config NET_CONFIG_MY_IPV4_ADDR
+        default ZENBEDDED_USB_CDC_MY_IPV4_ADDR if ZENBEDDED_USB_CDC_STATIC_IP
+
+    config NET_CONFIG_PEER_IPV4_ADDR
+        default ZENBEDDED_USB_CDC_PEER_IPV4_ADDR if ZENBEDDED_USB_CDC_STATIC_IP
+
+    config NET_CONFIG_MY_IPV4_NETMASK
+        default ZENBEDDED_USB_CDC_NETMASK if ZENBEDDED_USB_CDC_STATIC_IP
+
+    config ZENBEDDED_USBD_VID
+        hex "USB device Vendor ID"
+        default 0x303a if SOC_FAMILY_ESPRESSIF_ESP32
+        default 0x2fe3
+        help
+          USB device Vendor ID (VID). Default is Espressif (0x303a) or Zephyr (0x2fe3).
+
+    config ZENBEDDED_USBD_PID
+        hex "USB device Product ID"
+        default 0x0001
+        help
+          USB device Product ID (PID).
+
+    config ZENBEDDED_USBD_MANUFACTURER
+        string "USB device manufacturer string"
+        default "Open Source Robotics Foundation"
+
+    config ZENBEDDED_USBD_PRODUCT
+        string "USB device product string"
+        default "Zenbedded Demo"
+
+    config ZENBEDDED_USBD_MAX_POWER
+        int "USB device max power consumption (2mA units)"
+        default 125
+        help
+          Maximum power in 2mA units (125 = 250mA).
+
+    config ZENBEDDED_USB_CDC_DHCPV4_SERVER
+        bool "Run DHCPv4 server on USB CDC interface"
+        default y
+        depends on ZENBEDDED_USB_CDC_STATIC_IP
+        select NET_DHCPV4_SERVER
+        select NET_UDP
+        help
+          Leases peer IPv4 address to host PC for zero-config plug-and-play.
+
+    config NET_DHCPV4_SERVER_ADDR_COUNT
+        default 1 if ZENBEDDED_USB_CDC_DHCPV4_SERVER
+
+    config NET_DHCPV4_SERVER_ICMP_PROBE_TIMEOUT
+        default 0 if ZENBEDDED_USB_CDC_DHCPV4_SERVER
+
+    config NET_DHCPV4_SERVER_OPTION_ROUTER
+        default n if ZENBEDDED_USB_CDC_DHCPV4_SERVER
+
+endif # ZENBEDDED_COMM_USB_CDC
+
+endif # ZENBEDDED_COMMON

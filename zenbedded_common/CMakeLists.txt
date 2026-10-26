@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(CONFIG_ZENBEDDED_DEMO_COMMON)
-  zephyr_library_named(zenbedded_demo_common)
+if(CONFIG_ZENBEDDED_COMMON)
+  zephyr_library_named(zenbedded_common)
   zephyr_library_sources(
-    src/demo_network.cpp
+    src/network.cpp
   )
   zephyr_include_directories(include)
 
   zephyr_library_sources_ifdef(CONFIG_USB_DEVICE_STACK_NEXT
-    src/demo_usbd.c
+    src/usbd.c
   )
 endif()

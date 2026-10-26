@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-get_filename_component(ZENBEDDED_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+get_filename_component(ZENBEDDED_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
 list(APPEND ZEPHYR_EXTRA_MODULES
   "${ZENBEDDED_ROOT}/zenbedded_transport"
   "${ZENBEDDED_ROOT}/zenbedded_rcl"
-  "${ZENBEDDED_ROOT}/demos/common"
+  "${ZENBEDDED_ROOT}/zenbedded_common"
 )
 
 list(APPEND SNIPPET_ROOT
@@ -26,7 +26,7 @@ list(APPEND SNIPPET_ROOT
 
 # Default to cdc-ecm transport snippet if no snippet was specified
 if(NOT DEFINED SNIPPET OR "${SNIPPET}" STREQUAL "")
-  set(SNIPPET cdc-ecm CACHE STRING "Default demo transport snippet")
+  set(SNIPPET cdc-ecm CACHE STRING "Default transport snippet")
 endif()
 
 list(APPEND EXTRA_CONF_FILE

@@ -1,4 +1,4 @@
-name: zenbedded_demo_common
+name: zenbedded_common
 build:
   cmake: .
   kconfig: Kconfig
