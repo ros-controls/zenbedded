@@ -15,12 +15,12 @@
 #ifndef ZENBEDDED_COMMON__USBD_H_
 #define ZENBEDDED_COMMON__USBD_H_
 
+#include <zephyr/usb/usbd.h>
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
-#include <zephyr/usb/usbd.h>
 
   /**
    * @brief Initialize and configure the default Zenbedded USB device context.
