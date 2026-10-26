@@ -16,10 +16,10 @@
 
 """Parses a YAML schema (state_interfaces: <comp>: {<field>: <type>}) to generate C headers. Supported TYPE_MAP scalars: float32, float64, double, int32, uint64, int16, uint8."""
 
-import sys
-import yaml
 import argparse
 import os
+import sys
+import yaml
 
 TYPE_MAP = {
     "float32": ("float", 4),
@@ -44,7 +44,7 @@ def generate_header(yaml_path, output_path):
     for comp, fields in data.get("state_interfaces", {}).items():
         for field, ftype in fields.items():
             if ftype not in TYPE_MAP:
-                print(f"Error: Unknown type '{ftype}' in state {comp}.{field}")
+                print(f"Error: Unknown type '{ftype}' in state {comp}.{field}", file=sys.stderr)
                 sys.exit(1)
             ctype, size = TYPE_MAP[ftype]
             state_fields.append(f"  {ctype} {comp}_{field};")
@@ -53,7 +53,7 @@ def generate_header(yaml_path, output_path):
     for comp, fields in data.get("command_interfaces", {}).items():
         for field, ftype in fields.items():
             if ftype not in TYPE_MAP:
-                print(f"Error: Unknown type '{ftype}' in command {comp}.{field}")
+                print(f"Error: Unknown type '{ftype}' in command {comp}.{field}", file=sys.stderr)
                 sys.exit(1)
             ctype, size = TYPE_MAP[ftype]
             command_fields.append(f"  {ctype} {comp}_{field};")
@@ -85,7 +85,7 @@ typedef struct
 
     with open(output_path, "w") as f:
         f.write(header)
-    print(f"Successfully generated Tier 2 payload header at: {output_path}")
+    print(f"Successfully generated Tier 2 payload header at: {output_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":
