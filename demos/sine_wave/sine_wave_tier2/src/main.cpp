@@ -40,7 +40,39 @@ int main()
 
   static SineWaveClient client;
 
-  int ret = client.init(loop_freq);
+  int ret = -1;
+
+#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+  if (zenbedded::common::is_usbd_ready())
+  {
+    char usb_loc[32];
+    if (
+      zenbedded::common::get_usb_peer_locator(
+        ZENBEDDED_DEFAULT_LOCATOR, usb_loc, sizeof(usb_loc)) == 0)
+    {
+      LOG_INF("Attempting Zenoh connection over USB CDC ECM (%s)...", usb_loc);
+      ret = client.init(loop_freq, usb_loc);
+      if (ret != 0)
+      {
+        LOG_WRN("Failed to connect via USB CDC ECM (%s): %d", usb_loc, ret);
+      }
+    }
+  }
+#endif
+
+#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  if (ret != 0 && zenbedded::common::is_wifi_ready())
+  {
+    LOG_INF("Attempting Zenoh connection over Wi-Fi (%s)...", ZENBEDDED_DEFAULT_LOCATOR);
+    ret = client.init(loop_freq, ZENBEDDED_DEFAULT_LOCATOR);
+  }
+#endif
+
+  if (ret != 0)
+  {
+    ret = client.init(loop_freq, ZENBEDDED_DEFAULT_LOCATOR);
+  }
+
   if (ret != 0)
   {
     LOG_ERR("ZenbeddedClient.init failed with %d, aborting", ret);
