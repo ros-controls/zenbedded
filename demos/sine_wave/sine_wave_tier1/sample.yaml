@@ -8,15 +8,12 @@ tests:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
       - esp32_devkitc/esp32/procpu
-    extra_args:
-      - -DSNIPPET=wifi
+    extra_args: SNIPPET=wifi
   sample.zenbedded.sine_wave_tier1.usb_cdc:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
-    extra_args:
-      - -DSNIPPET=cdc-ecm
+    extra_args: SNIPPET=cdc-ecm
   sample.zenbedded.sine_wave_tier1.dual:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
-    extra_args:
-      - -DSNIPPET=cdc-ecm;wifi
+    extra_args: SNIPPET="cdc-ecm;wifi"
