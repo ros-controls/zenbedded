@@ -1,57 +1,159 @@
 # Zenbedded Sine Wave Demo
 
-A minimal end-to-end example showing `zenbedded_hardware_interface` and
-`zenbedded_rcl` working together: a Zephyr firmware app generates a
-sinusoidal signal which is inspected using PlotJuggler on `controller_manager/introspection_data` topics.
+A complete end-to-end demo demonstrating both **Tier 1** (native ROS 2 CDR serialization) and **Tier 2** (high-throughput packed numeric schema for `ros2_control`) using Zenbedded on Zephyr RTOS.
 
-This demo is intentionally state-only — no controller drives a command
-back down to the firmware. It exists to validate and document the
-wiring between the schema, the Zephyr RCL module, and the host-side
-hardware interface, not to demonstrate closed-loop control.
+The firmware generates a sinusoidal wave signal (`position = amplitude * sin(2 * pi * f * t)`) and dynamically accepts command messages to adjust the wave amplitude in real time.
 
-Both sides are generated from the same `interface_schema.yaml`
+```
+┌─────────────────────────────────┐                       ┌──────────────────────────────────────────────┐
+│ ESP32 / ESP32-S3 (Zephyr)       │   Zenoh (tcp/7447)    │ Host PC (ROS 2)                              │
+│                                 │ <───────────────────> │                                              │
+│ - sine_wave_tier1 (ROS 2 CDR)   │  Wi-Fi / USB CDC ECM  │ • rqt_plot / ros2 topic echo / PlotJuggler   │
+│ - sine_wave_tier2 (No-CDR POD)  │                       │ • zenbedded_hardware_interface (ros2_control)│
+└─────────────────────────────────┘                       └──────────────────────────────────────────────┘
+```
 
-## Prerequisites
+---
 
-- A built and installed `zenbedded_transport` (ament_cmake package)
-- A built `zenbedded_hardware_interface`
-- A Zephyr workspace with `zenbedded_rcl` set up as a module
-- An ESP32-S3 board (or adjust `CONFIG_WIFI_ESP32` / board target for a
-  different Zephyr-supported board)
-- A reachable Zenoh router, or peer-to-peer connectivity between the
-  board and the host
+## Architecture Variants
 
-## Building and running (host side)
+- **Tier 1 (`sine_wave_tier1`)**:
+  - Implements standard ROS 2 messages using `JointStateCodec` (`sensor_msgs/msg/JointState`) and `JointCommandCodec` (`control_msgs/msg/JointCommand`).
+  - Directly compatible with all ROS 2 nodes, CLI commands (`ros2 topic echo`), and visualization tools (`rqt_plot`) without requiring a custom hardware interface on the host PC.
+
+- **Tier 2 (`sine_wave_tier2`)**:
+  - Uses zero-copy packed numeric C structs generated from `interface_schema.yaml`.
+  - Interfaces directly with `zenbedded_hardware_interface` for seamless `ros2_control` integration.
+
+---
+
+## Hardware Support
+
+| Board | Target Qualifier | Supported Transports |
+|---|---|---|
+| **ESP32 DevKitC** | `esp32_devkitc/esp32/procpu` | Wi-Fi (`-S wifi`) |
+| **ESP32-S3 DevKitC** | `esp32s3_devkitc/esp32s3/procpu` | USB CDC ECM (`-S cdc-ecm`), Wi-Fi (`-S wifi`), or Dual Transport (`-S cdc-ecm -S wifi`) |
+
+---
+
+## Step 1: Start the Zenoh Router
+
+On your Host PC, start the Zenoh router. If using `rmw_zenoh_cpp`:
 
 ```bash
-cd <ros_ws>
-# copy packages or use "ln -s" symlink into the workspace
-rosdep update
-rosdep install --from-paths src --ignore-src -r -y
+export ZENOH_CONFIG_OVERRIDE='mode="peer";listen/endpoints=["tcp/0.0.0.0:7447"]'
+export RUST_LOG=zenoh=debug
+ros2 run rmw_zenoh_cpp rmw_zenohd
+```
+
+*(Alternatively, run the standalone router: `zenohd --listen tcp/0.0.0.0:7447`).*
+
+---
+
+## Step 2: Configure Firmware Target Locator
+
+Identify your PC's IP address on the local network (via `ip addr` on Linux or `ipconfig` on Windows).
+
+In the firmware project's `prj.conf` (`sine_wave_tier1/prj.conf` or `sine_wave_tier2/prj.conf`), configure the locator:
+
+```ini
+CONFIG_ZENBEDDED_ZENOH_LOCATOR="192.168.1.50:7447"
+```
+
+*(Note: For USB CDC ECM connections on ESP32-S3, default static peer IP `192.0.2.1:7447` is used automatically).*
+
+---
+
+## Step 3: Building and Flashing (Firmware)
+
+### For ESP32 DevKitC (Standard ESP32 over Wi-Fi)
+
+```bash
+# Tier 1
+west build -b esp32_devkitc/esp32/procpu demos/sine_wave/sine_wave_tier1 -p always -- -DSNIPPET=wifi
+west flash
+
+# Tier 2
+west build -b esp32_devkitc/esp32/procpu demos/sine_wave/sine_wave_tier2 -p always -- -DSNIPPET=wifi
+west flash
+```
+
+### For ESP32-S3 DevKitC
+
+```bash
+# Option A: Wired USB CDC ECM (Ethernet over USB)
+west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -- -DSNIPPET=cdc-ecm
+west flash
+
+# Option B: Wireless Wi-Fi
+west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -- -DSNIPPET=wifi
+west flash
+
+# Option C: Concurrent Dual Transport (USB CDC ECM + Wi-Fi simultaneously)
+west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -S cdc-ecm -S wifi
+west flash
+```
+
+---
+
+## Step 4: Configure Wi-Fi Credentials (Wi-Fi Builds Only)
+
+Open a serial monitor (e.g., `tio /dev/ttyUSB0` or `picocom -b 115200 /dev/ttyUSB0`) to access the Zephyr shell:
+
+```text
+wifi_cred add -s "<MY_WIFI_SSID>" -p "<MY_WIFI_PASSWORD>"
+wifi_cred set_default 0
+wifi_cred auto_connect
+```
+
+Credentials are saved in non-volatile flash storage (NVS) and persist across power cycles.
+
+---
+
+## Step 5: Real-Time Visualization and Testing
+
+### 1. Real-Time Visualization with `rqt_plot` (Recommended)
+
+`rqt_plot` is built on Python `rclpy` and works natively with `RMW_IMPLEMENTATION=rmw_zenoh_cpp` with no special environment adjustments:
+
+```bash
+ros2 run rqt_plot rqt_plot /zenbedded/sine_wave/state/position[0]
+```
+
+### 2. Topic Inspection via CLI (Tier 1)
+
+Inspect published `sensor_msgs/msg/JointState` messages in real time:
+
+```bash
+ros2 topic echo /zenbedded/sine_wave/state
+```
+
+### 3. Dynamic Amplitude Adjustment in Real Time (Tier 1)
+
+Send a command message to change the generated sine wave amplitude from `5.0` to `12.5`:
+
+```bash
+ros2 topic pub /zenbedded/sine_wave/cmd control_msgs/msg/JointCommand "{name: ['sine_wave'], interface_name: 'amplitude', values: [12.5]}"
+```
+
+Observe the amplitude change immediately reflected on `rqt_plot` and the serial console!
+
+### 4. Running Tier 2 with `ros2_control`
+
+On the Host PC:
+
+```bash
+cd <ros2_ws>
 colcon build --packages-select zenbedded_hardware_interface zenbedded_transport sine_wave_ros
 source install/setup.bash
 ros2 launch zenbedded_sine_wave sine_wave.launch.py
 ```
 
+### 5. Visualization with PlotJuggler
 
-## Building and flashing (firmware side)
-
-```bash
-cd sine_wave_zephyr
-west build --board=esp32s3_devkitc/esp32s3/procpu -p always
-west flash
-```
-
-Set network params in both `sine_wave.urdf` and the
-firmware's `client.init()` call to match your actual Zenoh router
-address before building.
-
-## Configuration reference
-
-| `<param>` (URDF, host side) | Required | Description                                                                                                      |
-|---|---|------------------------------------------------------------------------------------------------------------------|
-| `zenoh_endpoint` | yes | Zenoh connect endpoint, e.g. `tcp/192.168.1.50:7447`                                                             |
-| `state_topic` | yes | Key expression the firmware publishes state to                                                                   |
-| `command_topic` | yes | Key expression for commands (unused, but still required by the plugin)                                           |
-| `schema_path` | yes | **Absolute** path to `interface_schema.yaml` — no `$(find ...)` substitution happens in the launch file (with xacro) |
-| `zenoh_mode` | no | Defaults to `client`                                                                                             |
+> [!NOTE]
+> **PlotJuggler RMW Notice**: PlotJuggler's ROS 2 plugin relies on low-level DDS introspection hooks not present in `rmw_zenoh_cpp`. If using PlotJuggler with a DDS bridge, unset `RMW_IMPLEMENTATION` for both plotjuggler and sine_wave.launch.py:
+> ```bash
+> unset RMW_IMPLEMENTATION
+> ros2 run plotjuggler plotjuggler
+> ```

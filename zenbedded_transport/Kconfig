@@ -96,14 +96,21 @@ config ZENBEDDED_QOS_RELIABLE
 
 endchoice
 
-config ZENBEDDED_ZENOH_IP_PORT
-    string "Zenoh Target (IP:Port)"
+config ZENBEDDED_ZENOH_LOCATOR
+    string "Zenoh Target Locator (IP:Port)"
     default "127.0.0.1:7447"
     help
-      For Client: Enter Host PC IP (e.g., 192.168.1.50:7447).
-      For TCP Peer: Enter Listener IP (e.g., 0.0.0.0:7447).
-      For UDP Peer: Enter Multicast IP (e.g., 224.0.0.123:7447).
+      Network endpoint locator (e.g. 127.0.0.1:7447 or 192.168.1.50:7447).
+      For Client: Enter Host PC endpoint locator.
+      For TCP Peer: Enter Listener endpoint (e.g., 0.0.0.0:7447).
+      For UDP Peer: Enter Multicast endpoint (e.g., 224.0.0.123:7447).
       The transport layer will automatically prepend "udp/" or "tcp/".
+
+config ZENBEDDED_ZENOH_IP_PORT
+    string "Legacy Zenoh Target IP:Port (Deprecated alias)"
+    default ZENBEDDED_ZENOH_LOCATOR
+    help
+      Backwards-compatibility alias for ZENBEDDED_ZENOH_LOCATOR.
 
 config ZENBEDDED_TRANSPORT_DYNAMIC_PORT_OVERRIDE
     bool "Enable runtime dynamic Zenoh port override from environment"

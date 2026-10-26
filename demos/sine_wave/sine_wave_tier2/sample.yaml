@@ -1,0 +1,22 @@
+sample:
+  name: Sine Wave Tier2 demo
+common:
+  build_only: true
+  tags: zenbedded
+tests:
+  sample.zenbedded.sine_wave_tier2.wifi:
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+      - esp32_devkitc/esp32/procpu
+    extra_args:
+      - -DSNIPPET=wifi
+  sample.zenbedded.sine_wave_tier2.usb_cdc:
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+    extra_args:
+      - -DSNIPPET=cdc-ecm
+  sample.zenbedded.sine_wave_tier2.dual:
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+    extra_args:
+      - -DSNIPPET=cdc-ecm;wifi
