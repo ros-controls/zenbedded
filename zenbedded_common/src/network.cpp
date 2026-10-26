@@ -219,26 +219,19 @@ int init_usbd(net_if * iface)
 
 int init_network()
 {
-  int usb_ret = -ENOTSUP;
-  int wifi_ret = -ENOTSUP;
-
-#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
-  usb_ret = init_usbd();
+#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC) && defined(CONFIG_ZENBEDDED_COMM_WIFI)
+  int usb_ret = init_usbd();
   if (usb_ret != 0)
   {
     LOG_WRN("USB CDC interface not ready or timed out: %d", usb_ret);
   }
-#endif
 
-#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
-  wifi_ret = init_wifi();
+  int wifi_ret = init_wifi();
   if (wifi_ret != 0)
   {
     LOG_WRN("Wi-Fi interface not ready or timed out: %d", wifi_ret);
   }
-#endif
 
-#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC) && defined(CONFIG_ZENBEDDED_COMM_WIFI)
   if (usb_ret == 0 || wifi_ret == 0)
   {
     LOG_INF(
@@ -248,9 +241,9 @@ int init_network()
   }
   return -ENETDOWN;
 #elif defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
-  return usb_ret;
+  return init_usbd();
 #elif defined(CONFIG_ZENBEDDED_COMM_WIFI)
-  return wifi_ret;
+  return init_wifi();
 #else
   LOG_WRN("No network transport enabled in Kconfig");
   return 0;
