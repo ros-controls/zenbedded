@@ -20,12 +20,12 @@ The firmware generates a sinusoidal wave signal (`position = amplitude * sin(2 *
 - **Tier 1 (`sine_wave_tier1`)**:
   - Implements standard ROS 2 messages using `JointStateCodec` (`sensor_msgs/msg/JointState`) and `JointCommandCodec` (`control_msgs/msg/JointCommand`).
   - Directly compatible with all standard ROS 2 nodes, CLI commands (`ros2 topic echo`), and visualization tools (`rqt_plot`) without requiring a custom hardware interface on the host PC.
-  - Paired with the host-side `sine_wave_tier1` (`SineWaveTier1Node`) C++ commander running at 100 Hz.
+  - Paired with the host-side `sine_wave_tier1` (`SineWaveTier1Node`) C++ commander running at 50 Hz.
 
 - **Tier 2 (`sine_wave_tier2`)**:
   - Uses zero-copy packed numeric C structs generated from `interface_schema.yaml`.
   - Interfaces directly with `zenbedded_hardware_interface` for seamless `ros2_control` integration.
-  - Paired with the host-side `sine_wave_tier2` (`SineWaveTier2Controller`) controller plugin running at 100 Hz.
+  - Paired with the host-side `sine_wave_tier2` (`SineWaveTier2Controller`) controller plugin running at 50 Hz.
 
 ---
 
@@ -53,15 +53,17 @@ ros2 run rmw_zenoh_cpp rmw_zenohd
 
 ## Step 2: Configure Firmware Target Locator
 
-Identify your PC's IP address on the local network (via `ip addr` on Linux or `ipconfig` on Windows).
+The firmware defaults to `127.0.0.1:7447` in `prj.conf`.
+- **USB CDC ECM**: Uses static peer IP `192.0.2.1:7447` automatically when the USB carrier is active.
+- **Wi-Fi**: Requires your host PC's IP address on the local network (find via `ip addr` on Linux or `ipconfig` on Windows).
 
-In the firmware project's `prj.conf` (`sine_wave_tier1/prj.conf` or `sine_wave_tier2/prj.conf`), configure the locator:
+To avoid committing personal network IPs to version control, supply the host IP via an `extra.conf` file:
 
 ```ini
 CONFIG_ZENBEDDED_ZENOH_LOCATOR="192.168.1.50:7447"
 ```
 
-*(Note: For USB CDC ECM connections on ESP32-S3, default static peer IP `192.0.2.1:7447` is used automatically).*
+And pass `-- -DEXTRA_CONF_FILE=extra.conf` when building. *(Alternatively, edit `prj.conf` directly for local testing)*.
 
 ---
 
@@ -71,15 +73,15 @@ CONFIG_ZENBEDDED_ZENOH_LOCATOR="192.168.1.50:7447"
 
 ```bash
 # Option A: Wired USB CDC ECM (Ethernet over USB)
-west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -- -DSNIPPET=cdc-ecm
+west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -S cdc-ecm
 west flash
 
 # Option B: Wireless Wi-Fi
-west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -- -DSNIPPET=wifi
+west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -S wifi -- -DEXTRA_CONF_FILE=extra.conf
 west flash
 
-# Option C: Concurrent Dual Transport (USB CDC ECM + Wi-Fi simultaneously)
-west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -S cdc-ecm -S wifi
+# Option C: Concurrent Dual Transport (USB CDC ECM prioritized + Wi-Fi fallback)
+west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -S cdc-ecm -S wifi -- -DEXTRA_CONF_FILE=extra.conf
 west flash
 ```
 
@@ -122,7 +124,7 @@ ros2 launch zenbedded_sine_wave sine_wave_tier1.launch.py
 ```
 
 This starts:
-- `sine_wave_tier1` node streaming oscillating amplitude commands at 100 Hz.
+- `sine_wave_tier1` node streaming oscillating amplitude commands at 50 Hz.
 - `rqt_plot` automatically graphing:
   - `/zenbedded/sine_wave/state/position[0]` (firmware sine wave)
   - `/zenbedded/sine_wave/cmd/values[0]` (commanded amplitude)
@@ -138,10 +140,19 @@ ros2 launch zenbedded_sine_wave sine_wave_tier2.launch.py
 ```
 
 This starts:
-- `robot_state_publisher`, `ros2_control_node`, `joint_state_broadcaster`, and `sine_wave_tier2` controller plugin (100 Hz).
+- `robot_state_publisher`, `ros2_control_node`, `joint_state_broadcaster`, and `sine_wave_tier2` controller plugin (50 Hz).
 - `rqt_plot` automatically graphing the registered hardware introspection signals:
-  - `/controller_manager/introspection_data/values/values[0]` (position)
-  - `/controller_manager/introspection_data/values/values[1]` (amplitude)
+  - `/controller_manager/introspection_data/values/values[4]` (`state_interface.sine_wave/position`)
+  - `/controller_manager/introspection_data/values/values[5]` (`command_interface.sine_wave/amplitude`)
+  *(Note: indices 0–3 are reserved by `pal_statistics` for asynchronous topic publishing metrics).*
+
+### Launch Arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `tier` | `1` | Architecture tier: `'1'` for ROS 2 CDR topics, `'2'` for `ros2_control` hardware interface |
+| `use_rqt_plot` | `true` | Launch `rqt_plot` GUI (`false` for headless / terminal-only execution) |
+| `introspection_topic` | `/controller_manager/introspection_data/values` | Base introspection topic for Tier 2 `rqt_plot` |
 
 ### 3. Manual Testing & CLI Inspection
 

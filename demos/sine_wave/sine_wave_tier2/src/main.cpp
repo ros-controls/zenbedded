@@ -26,7 +26,7 @@ LOG_MODULE_REGISTER(sine_wave_tier2, LOG_LEVEL_INF);
 using SineWaveClient = ZenbeddedClient<RawCodec<zenbedded_state_t>, RawCodec<zenbedded_command_t>>;
 
 double wave_amp = 5;
-double wave_frequency = 1.4;  // hz
+double wave_frequency = 2.0;  // hz
 uint32_t loop_freq = 100;     // hz
 
 int main()

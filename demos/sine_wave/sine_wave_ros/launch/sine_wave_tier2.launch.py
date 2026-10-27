@@ -12,17 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathSubstitution
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    pkg_share = get_package_share_directory("zenbedded_sine_wave")
-    main_launch = os.path.join(pkg_share, "launch", "sine_wave.launch.py")
+    main_launch = (
+        PathSubstitution(FindPackageShare("zenbedded_sine_wave"))
+        / "launch"
+        / "sine_wave.launch.py"
+    )
 
     use_rqt_plot_arg = DeclareLaunchArgument(
         "use_rqt_plot",
