@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef SINE_WAVE_CONTROLLER__SINE_WAVE_CONTROLLER_HPP_
-#define SINE_WAVE_CONTROLLER__SINE_WAVE_CONTROLLER_HPP_
+#ifndef SINE_WAVE_CONTROLLER__SINE_WAVE_TIER2_CONTROLLER_HPP_
+#define SINE_WAVE_CONTROLLER__SINE_WAVE_TIER2_CONTROLLER_HPP_
 
 #include <string>
 
@@ -24,14 +24,13 @@
 namespace sine_wave_controller
 {
 /**
- * Open-loop controller that writes a sine wave to a single command interface
- * (e.g. "<joint>/velocity") exported by a hardware interface plugin such as
- * ZenbeddedHardware.
+ * @brief Open-loop Tier 2 controller that writes a sine wave command
+ * to the ros2_control amplitude command interface.
  */
-class SineWaveController : public controller_interface::ControllerInterface
+class SineWaveTier2Controller : public controller_interface::ControllerInterface
 {
 public:
-  SineWaveController();
+  SineWaveTier2Controller();
 
   controller_interface::CallbackReturn on_init() override;
 
@@ -49,7 +48,6 @@ public:
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 protected:
-  // Parameters (declared in on_init, read in on_configure)
   std::string component_name_;
   std::string cmd_interface_name_;
   double amplitude_;
@@ -62,4 +60,4 @@ protected:
 
 }  // namespace sine_wave_controller
 
-#endif  // SINE_WAVE_CONTROLLER__SINE_WAVE_CONTROLLER_HPP_
+#endif  // SINE_WAVE_CONTROLLER__SINE_WAVE_TIER2_CONTROLLER_HPP_

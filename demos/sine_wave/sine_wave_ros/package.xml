@@ -8,6 +8,7 @@
 
     <buildtool_depend>ament_cmake</buildtool_depend>
 
+    <depend>control_msgs</depend>
     <depend>rclcpp</depend>
     <depend>rclcpp_lifecycle</depend>
     <depend>zenbedded_hardware_interface</depend>
@@ -18,6 +19,7 @@
     <depend>pluginlib</depend>
     <depend>xacro</depend>
     <depend>launch_ros</depend>
+    <exec_depend>rqt_plot</exec_depend>
 
     <export>
         <build_type>ament_cmake</build_type>

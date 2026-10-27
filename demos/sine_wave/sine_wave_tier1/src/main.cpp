@@ -57,7 +57,7 @@ int main()
 
   int ret = -1;
 
-#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
   if (zenbedded::common::is_usbd_ready())
   {
     char usb_loc[32];
@@ -75,7 +75,7 @@ int main()
   }
 #endif
 
-#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMMON_WIFI)
   if (ret != 0 && zenbedded::common::is_wifi_ready())
   {
     LOG_INF("Attempting Zenoh connection over Wi-Fi (%s)...", ZENBEDDED_DEFAULT_LOCATOR);
