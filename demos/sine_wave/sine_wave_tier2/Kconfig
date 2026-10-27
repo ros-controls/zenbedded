@@ -1,0 +1,13 @@
+menu "Sine Wave Tier 2 Demo"
+
+config ZENBEDDED_ZENOH_LOCATOR
+    string "Zenoh Target Locator"
+    default "192.0.2.1:7447" if ZENBEDDED_COMMON_USB_CDC
+    default "127.0.0.1:7447"
+    help
+      Network endpoint locator for the Zenoh router (e.g. 192.168.1.50:7447 or 192.0.2.1:7447).
+
+
+endmenu
+
+source "Kconfig.zephyr"

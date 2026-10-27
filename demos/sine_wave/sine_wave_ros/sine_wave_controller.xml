@@ -1,9 +1,9 @@
 <library path="zenbedded_sine_wave">
-  <class name="sine_wave_controller/SineWaveController"
-         type="sine_wave_controller::SineWaveController"
+  <class name="sine_wave_tier2/SineWaveTier2Controller"
+         type="sine_wave_controller::SineWaveTier2Controller"
          base_class_type="controller_interface::ControllerInterface">
     <description>
-      Open-loop controller that writes a sine wave to a single command interface.
+      Open-loop Tier 2 controller that writes a sine wave command to ros2_control.
     </description>
   </class>
 </library>

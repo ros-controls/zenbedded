@@ -5,6 +5,7 @@ on:
     paths: &zephyr_twister_paths
       - 'demos/**'
       - 'tests/**'
+      - 'zenbedded_common/**'
       - 'zenbedded_rcl/**'
       - 'zenbedded_transport/**'
       - 'docker/**'

@@ -1,9 +1,0 @@
-sample:
-  name: Sine Wave Zephyr demo
-common:
-  build_only: true
-  tags: zenbedded
-tests:
-  sample.zenbedded.sine_wave_demo:
-    platform_allow:
-      - esp32s3_devkitc/esp32s3/procpu

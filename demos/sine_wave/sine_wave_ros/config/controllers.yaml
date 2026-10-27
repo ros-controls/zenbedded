@@ -1,17 +1,27 @@
 controller_manager:
   ros__parameters:
-    update_rate: 100
+    update_rate: 50
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-    sine_wave_controller:
-      type: sine_wave_controller/SineWaveController
+    sine_wave_tier2:
+      type: sine_wave_tier2/SineWaveTier2Controller
 
-sine_wave_controller:
+sine_wave_tier2:
   ros__parameters:
     hardware_component: sine_wave
     cmd_interface_name: amplitude
     amplitude: 5.0
-    frequency: 0.2 #hz
+    frequency: 0.4 #hz
     offset: 0.0
+
+sine_wave_tier1:
+  ros__parameters:
+    topic_name: "/zenbedded/sine_wave/cmd"
+    joint_name: "sine_wave"
+    interface_name: "amplitude"
+    amplitude: 5.0
+    frequency: 0.4 #hz
+    offset: 5.0
+    publish_rate: 50.0 #hz
