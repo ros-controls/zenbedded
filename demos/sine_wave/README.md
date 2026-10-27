@@ -6,7 +6,7 @@ The firmware generates a sinusoidal wave signal (`position = amplitude * sin(2 *
 
 ```
 ┌─────────────────────────────────┐                       ┌──────────────────────────────────────────────┐
-│ ESP32 / ESP32-S3 (Zephyr)       │   Zenoh (tcp/7447)    │ Host PC (ROS 2)                              │
+│ ESP32-S3 (Zephyr)               │   Zenoh (tcp/7447)    │ Host PC (ROS 2)                              │
 │                                 │ <───────────────────> │                                              │
 │ - sine_wave_tier1 (ROS 2 CDR)   │  Wi-Fi / USB CDC ECM  │ • rqt_plot / ros2 topic echo / PlotJuggler   │
 │ - sine_wave_tier2 (No-CDR POD)  │                       │ • zenbedded_hardware_interface (ros2_control)│
@@ -31,7 +31,6 @@ The firmware generates a sinusoidal wave signal (`position = amplitude * sin(2 *
 
 | Board | Target Qualifier | Supported Transports |
 |---|---|---|
-| **ESP32 DevKitC** | `esp32_devkitc/esp32/procpu` | Wi-Fi (`-S wifi`) |
 | **ESP32-S3 DevKitC** | `esp32s3_devkitc/esp32s3/procpu` | USB CDC ECM (`-S cdc-ecm`), Wi-Fi (`-S wifi`), or Dual Transport (`-S cdc-ecm -S wifi`) |
 
 ---
@@ -65,18 +64,6 @@ CONFIG_ZENBEDDED_ZENOH_LOCATOR="192.168.1.50:7447"
 ---
 
 ## Step 3: Building and Flashing (Firmware)
-
-### For ESP32 DevKitC (Standard ESP32 over Wi-Fi)
-
-```bash
-# Tier 1
-west build -b esp32_devkitc/esp32/procpu demos/sine_wave/sine_wave_tier1 -p always -- -DSNIPPET=wifi
-west flash
-
-# Tier 2
-west build -b esp32_devkitc/esp32/procpu demos/sine_wave/sine_wave_tier2 -p always -- -DSNIPPET=wifi
-west flash
-```
 
 ### For ESP32-S3 DevKitC
 
