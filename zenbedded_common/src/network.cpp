@@ -19,14 +19,14 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 
-#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMMON_WIFI)
 #if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
 #include <esp_wifi.h>
 #endif
 #include <zephyr/net/wifi_mgmt.h>
 #endif
 
-#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
 #if defined(CONFIG_USB_DEVICE_STACK_NEXT)
 #include <zenbedded_common/usbd.h>
 #include <zephyr/usb/usbd.h>
@@ -56,7 +56,7 @@ namespace zenbedded::common
 
 constexpr uint32_t kIpv4AcquireTimeout = 30000;  // ms
 
-#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMMON_WIFI)
 int init_wifi(net_if * iface)
 {
   if (iface == nullptr)
@@ -81,11 +81,7 @@ int init_wifi(net_if * iface)
 
   LOG_INF("Connection requested, waiting for IPv4 address on WiFi interface...");
 
-#if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
-  esp_wifi_set_ps(WIFI_PS_NONE);
-#endif
-
-#if defined(CONFIG_NET_DHCPV4)
+#if defined(CONFIG_NET_DHCPV4) && !defined(CONFIG_ESP32_WIFI_STA_AUTO_DHCPV4)
   net_dhcpv4_start(iface);
 #endif
 
@@ -100,6 +96,11 @@ int init_wifi(net_if * iface)
     }
     k_sleep(K_MSEC(200));
   }
+
+#if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
+  esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
+
   LOG_INF("Got IPv4 address via WiFi");
 
   return 0;
@@ -111,9 +112,9 @@ int init_wifi(net_if * iface)
   LOG_WRN("Wi-Fi transport not enabled in Kconfig");
   return -ENOTSUP;
 }
-#endif  // CONFIG_ZENBEDDED_COMM_WIFI
+#endif  // CONFIG_ZENBEDDED_COMMON_WIFI
 
-#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
 int init_usbd(net_if * iface)
 {
   LOG_INF("Initializing USB CDC network interface...");
@@ -236,11 +237,11 @@ int init_usbd(net_if * iface)
   LOG_WRN("USB CDC transport not enabled in Kconfig");
   return -ENOTSUP;
 }
-#endif  // CONFIG_ZENBEDDED_COMM_USB_CDC
+#endif  // CONFIG_ZENBEDDED_COMMON_USB_CDC
 
 int init_network()
 {
-#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC) && defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC) && defined(CONFIG_ZENBEDDED_COMMON_WIFI)
   int usb_ret = init_usbd();
   if (usb_ret != 0)
   {
@@ -261,9 +262,9 @@ int init_network()
     return 0;
   }
   return -ENETDOWN;
-#elif defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+#elif defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
   return init_usbd();
-#elif defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#elif defined(CONFIG_ZENBEDDED_COMMON_WIFI)
   return init_wifi();
 #else
   LOG_WRN("No network transport enabled in Kconfig");
@@ -273,7 +274,7 @@ int init_network()
 
 bool is_usbd_ready()
 {
-#if defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
   struct net_if * iface = nullptr;
 #if defined(CONFIG_USBD_CDC_ECM_CLASS)
   const struct device * dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(cdc_ecm_eth0));
@@ -282,7 +283,7 @@ bool is_usbd_ready()
     iface = net_if_lookup_by_dev(dev);
   }
 #endif
-#if !defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#if !defined(CONFIG_ZENBEDDED_COMMON_WIFI)
   if (iface == nullptr)
   {
     iface = net_if_get_default();
@@ -297,9 +298,9 @@ bool is_usbd_ready()
 
 bool is_wifi_ready()
 {
-#if defined(CONFIG_ZENBEDDED_COMM_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMMON_WIFI)
   struct net_if * iface = net_if_get_wifi_sta();
-#if !defined(CONFIG_ZENBEDDED_COMM_USB_CDC)
+#if !defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
   if (iface == nullptr)
   {
     iface = net_if_get_default();
