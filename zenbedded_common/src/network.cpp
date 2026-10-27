@@ -81,11 +81,7 @@ int init_wifi(net_if * iface)
 
   LOG_INF("Connection requested, waiting for IPv4 address on WiFi interface...");
 
-#if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
-  esp_wifi_set_ps(WIFI_PS_NONE);
-#endif
-
-#if defined(CONFIG_NET_DHCPV4)
+#if defined(CONFIG_NET_DHCPV4) && !defined(CONFIG_ESP32_WIFI_STA_AUTO_DHCPV4)
   net_dhcpv4_start(iface);
 #endif
 
@@ -100,6 +96,11 @@ int init_wifi(net_if * iface)
     }
     k_sleep(K_MSEC(200));
   }
+
+#if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
+  esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
+
   LOG_INF("Got IPv4 address via WiFi");
 
   return 0;
