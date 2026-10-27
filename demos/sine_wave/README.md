@@ -8,7 +8,7 @@ The firmware generates a sinusoidal wave signal (`position = amplitude * sin(2 *
 ┌─────────────────────────────────┐                       ┌──────────────────────────────────────────────┐
 │ ESP32-S3 (Zephyr)               │   Zenoh (tcp/7447)    │ Host PC (ROS 2)                              │
 │                                 │ <───────────────────> │                                              │
-│ - sine_wave_tier1 (ROS 2 CDR)   │  Wi-Fi / USB CDC ECM  │ • rqt_plot / ros2 topic echo / PlotJuggler   │
+│ - sine_wave_tier1 (ROS 2 CDR)   │  Wi-Fi / USB CDC ECM  │ • rqt_plot / ros2 topic echo                 │
 │ - sine_wave_tier2 (No-CDR POD)  │                       │ • zenbedded_hardware_interface (ros2_control)│
 └─────────────────────────────────┘                       └──────────────────────────────────────────────┘
 ```
@@ -80,7 +80,7 @@ west flash
 west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -S wifi -- -DEXTRA_CONF_FILE=extra.conf
 west flash
 
-# Option C: Concurrent Dual Transport (USB CDC ECM prioritized + Wi-Fi fallback)
+# Option C: Dual Transport (USB CDC ECM prioritized + Wi-Fi fallback)
 west build -b esp32s3_devkitc/esp32s3/procpu demos/sine_wave/sine_wave_tier1 -p always -S cdc-ecm -S wifi -- -DEXTRA_CONF_FILE=extra.conf
 west flash
 ```
@@ -94,9 +94,8 @@ west flash
 Open a serial monitor (e.g., `tio /dev/ttyACM1` or `picocom -b 115200 /dev/ttyACM1`) to access the Zephyr shell:
 
 ```text
-wifi_cred add -s "<MY_WIFI_SSID>" -p "<MY_WIFI_PASSWORD>"
-wifi_cred set_default 0
-wifi_cred auto_connect
+wifi cred add -s "<MY_WIFI_SSID>" -k 1 -p "<MY_WIFI_PASSWORD>"
+wifi cred auto_connect on
 ```
 
 Credentials are saved in non-volatile flash storage (NVS) and persist across power cycles.
@@ -203,12 +202,3 @@ To configure your host laptop to serve NTP persistently in the background:
    ```bash
    chronyc tracking
    ```
-
-### 5. Visualization with PlotJuggler
-
-> [!NOTE]
-> **PlotJuggler RMW Notice**: PlotJuggler's ROS 2 plugin relies on low-level DDS introspection hooks not present in `rmw_zenoh_cpp`. If using PlotJuggler with a DDS bridge, unset `RMW_IMPLEMENTATION` for both plotjuggler and sine_wave.launch.py:
-> ```bash
-> unset RMW_IMPLEMENTATION
-> ros2 run plotjuggler plotjuggler
-> ```
