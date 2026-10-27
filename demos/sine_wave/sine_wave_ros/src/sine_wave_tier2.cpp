@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sine_wave_controller/sine_wave_controller.hpp"
+#include "sine_wave_controller/sine_wave_tier2_controller.hpp"
 
 #include <cmath>
 
 namespace sine_wave_controller
 {
 
-SineWaveController::SineWaveController() : controller_interface::ControllerInterface() {}
+SineWaveTier2Controller::SineWaveTier2Controller() : controller_interface::ControllerInterface() {}
 
-controller_interface::CallbackReturn SineWaveController::on_init()
+controller_interface::CallbackReturn SineWaveTier2Controller::on_init()
 {
   try
   {
@@ -39,8 +39,8 @@ controller_interface::CallbackReturn SineWaveController::on_init()
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::InterfaceConfiguration SineWaveController::command_interface_configuration()
-  const
+controller_interface::InterfaceConfiguration
+SineWaveTier2Controller::command_interface_configuration() const
 {
   controller_interface::InterfaceConfiguration config;
   config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
@@ -48,8 +48,8 @@ controller_interface::InterfaceConfiguration SineWaveController::command_interfa
   return config;
 }
 
-controller_interface::InterfaceConfiguration SineWaveController::state_interface_configuration()
-  const
+controller_interface::InterfaceConfiguration
+SineWaveTier2Controller::state_interface_configuration() const
 {
   // Open-loop sine command needs no state feedback.
   controller_interface::InterfaceConfiguration config;
@@ -57,7 +57,7 @@ controller_interface::InterfaceConfiguration SineWaveController::state_interface
   return config;
 }
 
-controller_interface::CallbackReturn SineWaveController::on_configure(
+controller_interface::CallbackReturn SineWaveTier2Controller::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   component_name_ = get_node()->get_parameter("component_name").as_string();
@@ -74,7 +74,7 @@ controller_interface::CallbackReturn SineWaveController::on_configure(
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::CallbackReturn SineWaveController::on_activate(
+controller_interface::CallbackReturn SineWaveTier2Controller::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   // Reset the phase clock every time the controller is (re)activated.
@@ -82,14 +82,14 @@ controller_interface::CallbackReturn SineWaveController::on_activate(
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::CallbackReturn SineWaveController::on_deactivate(
+controller_interface::CallbackReturn SineWaveTier2Controller::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::return_type SineWaveController::update(
-  const rclcpp::Time & time, const rclcpp::Duration & period)
+controller_interface::return_type SineWaveTier2Controller::update(
+  const rclcpp::Time & time, const rclcpp::Duration & /*period*/)
 {
   if (!start_time_set_)
   {
@@ -117,4 +117,4 @@ controller_interface::return_type SineWaveController::update(
 #include "pluginlib/class_list_macros.hpp"
 
 PLUGINLIB_EXPORT_CLASS(
-  sine_wave_controller::SineWaveController, controller_interface::ControllerInterface)
+  sine_wave_controller::SineWaveTier2Controller, controller_interface::ControllerInterface)
