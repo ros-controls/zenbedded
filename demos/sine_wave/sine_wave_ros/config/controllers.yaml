@@ -13,7 +13,7 @@ sine_wave_tier2:
     hardware_component: sine_wave
     cmd_interface_name: amplitude
     amplitude: 5.0
-    frequency: 0.2 #hz
+    frequency: 0.4 #hz
     offset: 0.0
 
 sine_wave_tier1:
@@ -22,6 +22,6 @@ sine_wave_tier1:
     joint_name: "sine_wave"
     interface_name: "amplitude"
     amplitude: 5.0
-    frequency: 0.2 #hz
+    frequency: 0.4 #hz
     offset: 5.0
-    publish_rate: 100.0 #hz
+    publish_rate: 50.0 #hz

@@ -158,3 +158,51 @@ Publish a manual amplitude command (Tier 1):
 .. code-block:: bash
 
     ros2 topic pub -1 /zenbedded/sine_wave/cmd control_msgs/msg/JointCommand "{header: {frame_id: 'sine_wave'}, joint_names: ['sine_wave'], interface_name: 'amplitude', values: [12.5]}"
+
+Host Time Synchronization (Chrony Setup)
+----------------------------------------
+
+In Tier 1, the microcontroller publishes standard ``sensor_msgs/msg/JointState`` messages
+with timestamps embedded in ``header.stamp``. For ROS 2 tools such as ``rqt_plot`` to
+graph state and command topics simultaneously on the same timeline without a time-axis
+offset, the microcontroller clock must be synchronized with the host Unix epoch clock.
+
+The firmware uses Zephyr's SNTP client on boot to extract the host IP address directly
+from the active transport locator (e.g. ``192.0.2.1`` over USB CDC ECM or the host Wi-Fi IP)
+and updates POSIX ``CLOCK_REALTIME``.
+
+Configure Chrony on the Host
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Install Chrony on your host laptop:
+
+   .. code-block:: bash
+
+       sudo apt install chrony
+
+2. Allow NTP client requests from the USB CDC subnet and local network by adding the
+   following lines to ``/etc/chrony/chrony.conf``:
+
+   .. code-block:: text
+
+       # Allow NTP queries from USB CDC ECM subnet
+       allow 192.0.2.0/24
+
+       # Allow queries from local LAN / Wi-Fi subnet
+       allow 10.0.0.0/8
+
+       # Serve local time even when disconnected from internet upstream
+       local stratum 10
+
+3. Ensure Chrony runs persistently in the background as a systemd service:
+
+   .. code-block:: bash
+
+       sudo systemctl enable --now chrony
+       sudo systemctl restart chrony
+
+4. Verify Chrony is active and serving time:
+
+   .. code-block:: bash
+
+       chronyc tracking

@@ -157,7 +157,43 @@ Send a manual amplitude command (Tier 1):
 ros2 topic pub -1 /zenbedded/sine_wave/cmd control_msgs/msg/JointCommand "{header: {frame_id: 'sine_wave'}, joint_names: ['sine_wave'], interface_name: 'amplitude', values: [12.5]}"
 ```
 
-### 4. Visualization with PlotJuggler
+### 4. Host Time Synchronization (Chrony Setup)
+
+In Tier 1, the microcontroller publishes `sensor_msgs/msg/JointState` messages with timestamps embedded in `header.stamp`. For ROS 2 tools such as `rqt_plot` to graph state and command curves simultaneously on the exact same timeline, the microcontroller clock is synchronized with the host Unix epoch clock.
+
+The firmware uses Zephyr's SNTP client on boot, dynamically extracting the host IP from the active transport locator (e.g. `192.0.2.1` over USB CDC ECM or the host Wi-Fi IP), and sets POSIX `CLOCK_REALTIME`.
+
+To configure your host laptop to serve NTP persistently in the background:
+
+1. Install Chrony:
+   ```bash
+   sudo apt install chrony
+   ```
+
+2. Add client access and standalone serving to `/etc/chrony/chrony.conf`:
+   ```text
+   # Allow NTP queries from USB CDC ECM subnet
+   allow 192.0.2.0/24
+
+   # Allow queries from local LAN / Wi-Fi subnet
+   allow 10.0.0.0/8
+
+   # Serve local time even when disconnected from internet upstream
+   local stratum 10
+   ```
+
+3. Enable Chrony to run permanently in the background as a systemd service:
+   ```bash
+   sudo systemctl enable --now chrony
+   sudo systemctl restart chrony
+   ```
+
+4. Verify Chrony is active:
+   ```bash
+   chronyc tracking
+   ```
+
+### 5. Visualization with PlotJuggler
 
 > [!NOTE]
 > **PlotJuggler RMW Notice**: PlotJuggler's ROS 2 plugin relies on low-level DDS introspection hooks not present in `rmw_zenoh_cpp`. If using PlotJuggler with a DDS bridge, unset `RMW_IMPLEMENTATION` for both plotjuggler and sine_wave.launch.py:
