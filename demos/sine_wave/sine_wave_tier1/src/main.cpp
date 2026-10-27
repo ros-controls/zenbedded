@@ -122,9 +122,9 @@ int main()
 
   int ret = -1;
   const char * selected_locator = ZENBEDDED_DEFAULT_LOCATOR;
-  char usb_loc[32];
 
 #if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
+  char usb_loc[32];
   if (zenbedded::common::is_usbd_ready())
   {
     if (
