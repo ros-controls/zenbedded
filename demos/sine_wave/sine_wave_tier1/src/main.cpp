@@ -31,7 +31,7 @@ LOG_MODULE_REGISTER(sine_wave_tier1, LOG_LEVEL_INF);
 using SineWaveClient = ZenbeddedClient<JointStateCodec, JointCommandCodec>;
 
 double wave_amp = 5.0;
-double wave_frequency = 1.4;  // hz
+double wave_frequency = 2.0;  // hz
 uint32_t loop_freq = 100;     // hz
 
 static int extract_host_from_locator(const char * locator, char * out_host, size_t out_len)
