@@ -54,7 +54,6 @@ LOG_MODULE_REGISTER(zenbedded_net, LOG_LEVEL_INF);
 namespace zenbedded::common
 {
 
-constexpr uint32_t kWifiConnectTimeout = 15000;  // ms
 constexpr uint32_t kIpv4AcquireTimeout = 30000;  // ms
 
 #if defined(CONFIG_ZENBEDDED_COMM_WIFI)
@@ -69,21 +68,28 @@ int init_wifi(net_if * iface)
     }
   }
 
+  // Allow Wi-Fi radio and L2 stack to fully stabilize after boot
+  k_sleep(K_MSEC(500));
+
   LOG_INF("Connecting to WiFi using stored credentials...");
-  uint32_t timer = k_uptime_get_32();
-  while (net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, nullptr, 0) != 0)
+  int req_ret = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, nullptr, 0);
+  if (req_ret != 0 && req_ret != -EALREADY)
   {
-    if (k_uptime_get_32() - timer > kWifiConnectTimeout)
-    {
-      LOG_ERR("WiFi connection timed out");
-      return -ETIMEDOUT;
-    }
-    LOG_DBG("WiFi connect-stored request failed... retrying...");
-    k_sleep(K_MSEC(500));
+    LOG_ERR("WiFi connect-stored request failed: %d", req_ret);
+    return req_ret;
   }
 
-  LOG_INF("Connected... Waiting for IPv4 address on WiFi interface");
-  timer = k_uptime_get_32();
+  LOG_INF("Connection requested, waiting for IPv4 address on WiFi interface...");
+
+#if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
+  esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
+
+#if defined(CONFIG_NET_DHCPV4)
+  net_dhcpv4_start(iface);
+#endif
+
+  uint32_t timer = k_uptime_get_32();
   while (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) == nullptr)
   {
     if (k_uptime_get_32() - timer > kIpv4AcquireTimeout)
@@ -95,11 +101,6 @@ int init_wifi(net_if * iface)
     k_sleep(K_MSEC(200));
   }
   LOG_INF("Got IPv4 address via WiFi");
-
-#if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
-  esp_wifi_set_ps(WIFI_PS_NONE);
-  k_sleep(K_MSEC(200));
-#endif
 
   return 0;
 }
@@ -147,8 +148,28 @@ int init_usbd(net_if * iface)
     }
   }
 
+  // Fast USB cable carrier check: if unplugged, fall back to Wi-Fi quickly
+  uint32_t carrier_timer = k_uptime_get_32();
+  while (!net_if_is_carrier_ok(iface))
+  {
+    if (k_uptime_get_32() - carrier_timer > 2000)
+    {
+      LOG_INF("USB CDC carrier down (cable unplugged), skipping USB transport");
+      return -ENOTCONN;
+    }
+    k_sleep(K_MSEC(100));
+  }
+
 #if defined(CONFIG_NET_CONFIG_SETTINGS)
-  (void)net_config_init_app(nullptr, "Initializing USB network");
+  const struct device * cdc_dev = nullptr;
+#if defined(CONFIG_USBD_CDC_ECM_CLASS)
+  cdc_dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(cdc_ecm_eth0));
+#endif
+  int cfg_ret = net_config_init_app(cdc_dev, "Initializing USB network");
+  if (cfg_ret != 0)
+  {
+    LOG_WRN("net_config_init_app returned %d for USB CDC", cfg_ret);
+  }
 #elif defined(CONFIG_NET_DHCPV4)
   net_dhcpv4_start(iface);
 #endif

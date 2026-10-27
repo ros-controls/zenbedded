@@ -20,7 +20,7 @@ menuconfig ZENBEDDED_COMMON
 
 if ZENBEDDED_COMMON
 
-config ZENBEDDED_COMM_USB_CDC
+config ZENBEDDED_COMMON_USB_CDC
     bool "USB CDC (Ethernet) Interface"
     default n
     select USB_DEVICE_STACK_NEXT
@@ -29,7 +29,11 @@ config ZENBEDDED_COMM_USB_CDC
     help
       Connect over USB CDC ECM (Ethernet emulation) for wired communication.
 
-config ZENBEDDED_COMM_WIFI
+config ZENBEDDED_COMM_USB_CDC
+    bool
+    default y if ZENBEDDED_COMMON_USB_CDC
+
+config ZENBEDDED_COMMON_WIFI
     bool "Wi-Fi Interface"
     default n
     select WIFI
@@ -42,10 +46,14 @@ config ZENBEDDED_COMM_WIFI
     help
       Connect over 802.11 Wi-Fi station mode using stored credentials.
 
-config NET_MAX_CONTEXTS
-    default 10 if ZENBEDDED_COMM_USB_CDC && ZENBEDDED_COMM_WIFI
+config ZENBEDDED_COMM_WIFI
+    bool
+    default y if ZENBEDDED_COMMON_WIFI
 
-if ZENBEDDED_COMM_USB_CDC
+config NET_MAX_CONTEXTS
+    default 10 if (ZENBEDDED_COMMON_USB_CDC || ZENBEDDED_COMM_USB_CDC) && (ZENBEDDED_COMMON_WIFI || ZENBEDDED_COMM_WIFI)
+
+if ZENBEDDED_COMMON_USB_CDC || ZENBEDDED_COMM_USB_CDC
 
     config ZENBEDDED_USB_CDC_STATIC_IP
         bool "Configure static IPv4 address on USB CDC interface"
@@ -123,6 +131,6 @@ if ZENBEDDED_COMM_USB_CDC
     config NET_DHCPV4_SERVER_OPTION_ROUTER
         default n if ZENBEDDED_USB_CDC_DHCPV4_SERVER
 
-endif # ZENBEDDED_COMM_USB_CDC
+endif # ZENBEDDED_COMMON_USB_CDC
 
 endif # ZENBEDDED_COMMON
