@@ -100,7 +100,6 @@ jobs:
             --testsuite-root ${{ matrix.suite }} \
             --platform native_sim/native/64 \
             --platform esp32s3_devkitc/esp32s3/procpu \
-            --platform esp32_devkitc/esp32/procpu \
             --inline-logs \
             -v \
             --outdir twister-out

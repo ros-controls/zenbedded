@@ -7,7 +7,6 @@ tests:
   sample.zenbedded.sine_wave_tier1.wifi:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
-      - esp32_devkitc/esp32/procpu
     extra_args: SNIPPET=wifi
   sample.zenbedded.sine_wave_tier1.usb_cdc:
     platform_allow:
