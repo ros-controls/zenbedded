@@ -71,10 +71,10 @@ private:
   std::vector<hardware_interface::StateInterface::SharedPtr> state_interfaces_;
   std::vector<hardware_interface::CommandInterface::SharedPtr> command_interfaces_;
 
-  // hw_states_: [0] motor_pos, [1] motor_vel, [2] pendulum_pos, [3] pendulum_vel
-  std::vector<double> hw_states_{0.0, 0.0, 0.0, 0.0};
-  // hw_commands_: [0] motor_accel
-  std::vector<double> hw_commands_{0.0};
+  // Handles are value-semantics (LooseHandle) and hold their own state; no
+  // extra double-vector staging is needed. write() keeps the last accepted
+  // acceleration command so a NaN command falls back to the previous value.
+  double last_accel_cmd_{0.0};
 
   std::mutex state_mutex_;
   double latest_q1_{0.0};
