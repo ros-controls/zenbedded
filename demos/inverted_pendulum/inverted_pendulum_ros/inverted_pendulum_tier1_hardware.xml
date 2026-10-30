@@ -1,0 +1,11 @@
+<library path="inverted_pendulum_tier1_hardware">
+  <class name="zenbedded_inverted_pendulum/InvertedPendulumTier1Hardware"
+         type="zenbedded_inverted_pendulum::InvertedPendulumTier1Hardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Topic-based hardware interface for Inverted Pendulum Tier 1.
+      Subscribes to sensor_msgs/JointState from the Tier 1 Zephyr MCU firmware
+      and publishes control_msgs/JointCommand acceleration back to the MCU.
+    </description>
+  </class>
+</library>

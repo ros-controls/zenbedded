@@ -125,6 +125,18 @@ private:
   double initial_q2_{0.1};             ///< initial angle near upright for controller balance
   double initial_q2_jitter_{0.002};    ///< subtle initial perturbance jitter
 
+  // ---- periodic random kicking --------------------------------------------
+  bool kick_enable_{true};
+  double first_kick_delay_{3.0};      ///< initial settling time before 1st kick [s]
+  double kick_interval_mean_{4.0};    ///< average time between kicks [s]
+  double kick_interval_jitter_{1.0};  ///< +- uniform interval jitter [s]
+  double kick_magnitude_min_{1.8};    ///< minimum kick angular velocity [rad/s]
+  double kick_magnitude_max_{3.5};    ///< maximum kick angular velocity [rad/s]
+  double topple_kick_chance_{0.25};   ///< probability of a topple-level disturbance kick
+  double topple_magnitude_min_{5.5};  ///< minimum topple kick angular velocity [rad/s]
+  double topple_magnitude_max_{8.0};  ///< maximum topple kick angular velocity [rad/s]
+  double next_kick_time_{3.0};        ///< next scheduled kick sim_time [s]
+
   // ---- integration / timing ---------------------------------------------
   double sim_speed_{1.0};  ///< sim seconds per wall second
   double max_substep_{5.0e-4};

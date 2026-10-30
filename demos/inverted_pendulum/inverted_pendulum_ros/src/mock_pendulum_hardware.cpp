@@ -132,6 +132,18 @@ CallbackReturn MockPendulumHardware::on_init(
   initial_q2_ = param("initial_q2", kPi);
   initial_q2_jitter_ = std::fabs(param("initial_q2_jitter", 0.01));
 
+  kick_enable_ = param_bool("kick_enable", true);
+  first_kick_delay_ = std::max(param("first_kick_delay", 3.0), 0.5);
+  kick_interval_mean_ = std::max(param("kick_interval_mean", 4.0), 0.5);
+  kick_interval_jitter_ =
+    std::clamp(param("kick_interval_jitter", 1.0), 0.0, kick_interval_mean_ - 0.1);
+  kick_magnitude_min_ = std::fabs(param("kick_magnitude_min", 1.8));
+  kick_magnitude_max_ = std::max(std::fabs(param("kick_magnitude_max", 3.5)), kick_magnitude_min_);
+  topple_kick_chance_ = std::clamp(param("topple_kick_chance", 0.25), 0.0, 1.0);
+  topple_magnitude_min_ = std::fabs(param("topple_magnitude_min", 5.5));
+  topple_magnitude_max_ =
+    std::max(std::fabs(param("topple_magnitude_max", 8.0)), topple_magnitude_min_);
+
   sim_speed_ = param("sim_speed_factor", 1.0);
   if (!(sim_speed_ > 0.0))
   {
@@ -242,6 +254,10 @@ CallbackReturn MockPendulumHardware::on_activate(const rclcpp_lifecycle::State &
   at_limit_ = false;
   step_loss_ = false;
 
+  std::uniform_real_distribution<double> init_jitter_dist(
+    -kick_interval_jitter_, kick_interval_jitter_);
+  next_kick_time_ = std::max(1.0, first_kick_delay_ + init_jitter_dist(rng_));
+
   have_prev_meas_ = false;
   q2_dot_filt_ = 0.0;
   hw_commands_[0] = 0.0;
@@ -339,6 +355,53 @@ void MockPendulumHardware::integrate(double h)
 
   // Realised arm acceleration experienced by the pendulum
   const double a_real = (v_new - v_old) / h;
+
+  // Periodic random disturbance kicks
+  if (kick_enable_ && sim_time_ >= next_kick_time_)
+  {
+    const double sign = (rng_() % 2 == 0) ? 1.0 : -1.0;
+    std::uniform_real_distribution<double> chance_dist(0.0, 1.0);
+    const bool is_topple = (topple_kick_chance_ > 0.0 && chance_dist(rng_) < topple_kick_chance_);
+
+    double kick = 0.0;
+    if (is_topple)
+    {
+      std::uniform_real_distribution<double> topple_dist(
+        topple_magnitude_min_, topple_magnitude_max_);
+      kick = sign * topple_dist(rng_);
+    }
+    else
+    {
+      std::uniform_real_distribution<double> mag_dist(kick_magnitude_min_, kick_magnitude_max_);
+      kick = sign * mag_dist(rng_);
+    }
+    q2_dot_ += kick;
+
+    std::uniform_real_distribution<double> jitter_dist(
+      -kick_interval_jitter_, kick_interval_jitter_);
+    // Give extra settling time after a toppling kick to allow complete swing-up recovery
+    const double base_interval =
+      is_topple ? std::max(kick_interval_mean_, 5.0) : kick_interval_mean_;
+    const double next_interval = std::max(2.0, base_interval + jitter_dist(rng_));
+    next_kick_time_ = sim_time_ + next_interval;
+
+    if (is_topple)
+    {
+      RCLCPP_INFO(
+        logger(),
+        "🌪️ [TOPPLE KICK] Applied %+.2f rad/s massive disturbance to topple pendulum at "
+        "sim_time=%.2fs (next kick in %.2fs)",
+        kick, sim_time_, next_interval);
+    }
+    else
+    {
+      RCLCPP_INFO(
+        logger(),
+        "💥 [KICK] Applied %+.2f rad/s disturbance to pendulum at sim_time=%.2fs (next kick in "
+        "%.2fs)",
+        kick, sim_time_, next_interval);
+    }
+  }
 
   // Pendulum integration
   double a2 = pendulum_accel(q2_, q2_dot_, v_old, a_real);
