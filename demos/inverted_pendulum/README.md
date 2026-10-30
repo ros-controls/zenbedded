@@ -75,6 +75,7 @@ To synchronize timestamps across host and MCU, allow local subnets in `/etc/chro
 
 ```text
 allow 192.0.2.0/24
+allow 192.168.0.0/16
 ```
 
 Then restart Chrony:
@@ -125,9 +126,8 @@ Credentials are automatically persisted to non-volatile storage (NVS flash).
 
 | LED Indicator | Status |
 |---|---|
-| **Solid Blue** | Power-on initialization, awaiting network IP and encoder zero calibration |
-| **Flashing Green (4 Hz)** | Network connected, encoder calibrated, 100 Hz control loop running |
-| **Solid Red** | Safety limit trip / encoder disconnect |
+| **Solid Blue** | Firmware initialization (network/encoder bring-up). Stays solid blue if the Zenoh connection never completes — see Troubleshooting. |
+| **Flashing Green (toggles every 250 ms)** | Zenoh session live; publishing state and executing the 100 Hz control loop. |
 
 ---
 
@@ -164,17 +164,21 @@ ros2 launch zenbedded_inverted_pendulum inverted_pendulum.launch.py tier:=2 use_
 
 ## Hardware Wiring Guide
 
-### TMC2209 Stepper Driver (Default)
+### TMC2209 Stepper Driver (32 microstep)
+
+GPIO-controlled microstepping resolved to 32 microsteps in the overlay (matching `micro-step-res = <32>`):
 
 | Signal | ESP32-S3 GPIO | Notes |
 |---|---|---|
-| **EN** | GPIO4 | Active Low |
-| **M0** | GPIO5 | Microstepping configuration |
-| **M1** | GPIO6 | Microstepping configuration |
-| **STEP** | GPIO7 | Direction inverted in overlay |
-| **DIR** | GPIO8 | Direction control |
-| **VDD** | 3.3V | Logic power |
+| **EN** | GPIO4 | Enable output (active low) |
+| **M0** | GPIO5 | Microstepping select 0 |
+| **M1** | GPIO6 | Microstepping select 1 |
+| **STEP** | GPIO7 | Step pulse output |
+| **DIR** | GPIO8 | Direction output (inverted in overlay via `invert-direction`) |
+| **VMOT** | Motor V+ | External 12V-24V power with 100 µF capacitor |
 | **GND** | GND | Common ground with MCU and motor supply |
+
+The legacy A4988 mapping (EN = GPIO13, STEP = GPIO3, DIR = GPIO8) remains available as a commented-out `a4988` node in the board overlay.
 
 ### AS5600 Magnetic Encoder (I2C)
 
@@ -190,3 +194,11 @@ ros2 launch zenbedded_inverted_pendulum inverted_pendulum.launch.py tier:=2 use_
 | Signal | ESP32-S3 GPIO | Notes |
 |---|---|---|
 | **DIN** | GPIO48 | Driven via I2S DMA on-board LED |
+
+---
+
+## Troubleshooting
+
+- **Robot model is invisible or white in RViz**: ensure Git LFS binary STLs are pulled (`git lfs pull`) and the RobotModel display has `Durability Policy` set to `Transient Local`.
+- **Controller manager hangs waiting for `robot_description`**: when using `rmw_zenoh_cpp`, make sure `zenohd -l tcp/0.0.0.0:7447` is running.
+- **LED stays solid blue on the MCU**: the MCU cannot resolve or connect to the Zenoh router. For USB CDC-ECM, verify the host interface (`enx...` or `usb0`) has IP `192.0.2.1/24`.

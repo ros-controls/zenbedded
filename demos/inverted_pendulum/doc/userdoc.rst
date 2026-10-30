@@ -103,23 +103,24 @@ Tier 1 (ROS 2 Topics over USB CDC-ECM):
 
 .. code-block:: bash
 
-    west build -p always -b esp32s3_devkitc/esp32s3/procpu \
-      demos/inverted_pendulum/inverted_pendulum_tier1 -- -S cdc-ecm
+    west build -b esp32s3_devkitc/esp32s3/procpu -p always \
+      demos/inverted_pendulum/inverted_pendulum_tier1 -S cdc-ecm
 
 Tier 2 (Zenbedded Binary over USB CDC-ECM):
 
 .. code-block:: bash
 
-    west build -p always -b esp32s3_devkitc/esp32s3/procpu \
-      demos/inverted_pendulum/inverted_pendulum_tier2 -- -S cdc-ecm
+    west build -b esp32s3_devkitc/esp32s3/procpu -p always \
+      demos/inverted_pendulum/inverted_pendulum_tier2 -S cdc-ecm
 
-To enable Wi-Fi or dual transport, append ``-S wifi``:
+To enable Wi-Fi, use ``-S wifi`` instead. For concurrent dual transport
+(USB CDC-ECM priority with Wi-Fi fallback), pass both snippets:
 
 .. code-block:: bash
 
     # Dual Transport (USB CDC-ECM priority with Wi-Fi fallback)
-    west build -p always -b esp32s3_devkitc/esp32s3/procpu \
-      demos/inverted_pendulum/inverted_pendulum_tier2 -- -S cdc-ecm -S wifi
+    west build -b esp32s3_devkitc/esp32s3/procpu -p always \
+      demos/inverted_pendulum/inverted_pendulum_tier2 -S cdc-ecm -S wifi
 
 2. Flash and Monitor
 ~~~~~~~~~~~~~~~~~~~~
@@ -147,12 +148,12 @@ In the serial console, save network credentials to NVS:
 
    * - LED Color
      - Meaning
-   * - Blue
-     - Initializing peripherals and establishing network / Zenoh connection.
-   * - Flashing Green
-     - Connected to Zenoh; publishing state and executing control commands.
-   * - Red
-     - Safety stop / encoder disconnect / loss of communication.
+   * - Blue (solid)
+     - Initialization: peripherals up, acquiring network IP and boot-time
+       encoder zero. If the LED stays solid blue, the Zenoh connection never
+       completed (see Troubleshooting).
+   * - Flashing Green (toggles every 250 ms)
+     - Zenoh session live; publishing state and executing control commands.
 
 Host Bringup (ROS 2)
 --------------------
@@ -223,8 +224,11 @@ AS5600 12-Bit Magnetic Encoder (I2C)
      - GND
      - Common ground
 
-Stepper Driver (A4988 / TMC2209)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Stepper Driver (TMC2209)
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The demo wires a TMC2209 driver with GPIO-controlled microstepping pins,
+resolved to 32 microsteps in the overlay (matching ``micro-step-res = <32>``).
 
 .. list-table::
    :header-rows: 1
@@ -233,21 +237,30 @@ Stepper Driver (A4988 / TMC2209)
    * - Signal
      - ESP32 GPIO
      - Notes
+   * - EN
+     - GPIO4
+     - Enable output (active low)
+   * - M0
+     - GPIO5
+     - Microstepping select 0
+   * - M1
+     - GPIO6
+     - Microstepping select 1
    * - STEP
-     - GPIO3
-     - Stepper step pulse output
+     - GPIO7
+     - Step pulse output
    * - DIR
      - GPIO8
-     - Direction output
-   * - EN
-     - GPIO13
-     - Enable output (active low)
+     - Direction output (inverted in overlay via ``invert-direction``)
    * - VMOT
      - Motor V+
      - External 12V-24V power with 100 µF capacitor
    * - GND
      - GND
      - Common ground with ESP32
+
+The legacy A4988 mapping (EN = GPIO13, STEP = GPIO3, DIR = GPIO8) remains
+available as a commented-out ``a4988`` node in the board overlay.
 
 Status LED (WS2812 NeoPixel)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
