@@ -7,11 +7,13 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(control_msgs REQUIRED)
 find_package(controller_interface REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 add_library(zenbedded_inverted_pendulum SHARED src/inverted_pendulum_controller.cpp)
 target_include_directories(zenbedded_inverted_pendulum PRIVATE include)
@@ -34,19 +36,33 @@ target_link_libraries(mock_pendulum_hardware
 )
 pluginlib_export_plugin_description_file(hardware_interface mock_pendulum_hardware.xml)
 
+add_library(inverted_pendulum_tier1_hardware SHARED src/inverted_pendulum_tier1_hardware.cpp)
+target_include_directories(inverted_pendulum_tier1_hardware PRIVATE include)
+target_link_libraries(inverted_pendulum_tier1_hardware
+        PUBLIC
+        hardware_interface::hardware_interface
+        pluginlib::pluginlib
+        rclcpp::rclcpp
+        rclcpp_lifecycle::rclcpp_lifecycle
+        sensor_msgs::sensor_msgs
+        control_msgs::control_msgs
+)
+pluginlib_export_plugin_description_file(hardware_interface inverted_pendulum_tier1_hardware.xml)
+
 install(DIRECTORY include/ DESTINATION include)
-install(TARGETS zenbedded_inverted_pendulum mock_pendulum_hardware
+install(TARGETS zenbedded_inverted_pendulum mock_pendulum_hardware inverted_pendulum_tier1_hardware
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
 )
-install(FILES inverted_pendulum_controller.xml mock_pendulum_hardware.xml
+install(FILES inverted_pendulum_controller.xml mock_pendulum_hardware.xml inverted_pendulum_tier1_hardware.xml
         DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY urdf config launch meshes DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
     find_package(ament_cmake_pytest REQUIRED)
     ament_add_pytest_test(test_mock_pendulum test/test_mock_pendulum_launch.py)
+    ament_add_pytest_test(test_inverted_pendulum_tier1 test/test_inverted_pendulum_tier1_launch.py)
 endif()
 
 ament_package()

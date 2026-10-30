@@ -20,6 +20,8 @@
     <depend>joint_state_broadcaster</depend>
     <depend>controller_interface</depend>
     <depend>pluginlib</depend>
+    <depend>sensor_msgs</depend>
+    <depend>control_msgs</depend>
     <depend>xacro</depend>
     <depend>launch_ros</depend>
 
@@ -27,5 +29,6 @@
         <build_type>ament_cmake</build_type>
         <controller_interface plugin="${prefix}/inverted_pendulum_controller.xml"/>
         <hardware_interface plugin="${prefix}/mock_pendulum_hardware.xml"/>
+        <hardware_interface plugin="${prefix}/inverted_pendulum_tier1_hardware.xml"/>
     </export>
 </package>

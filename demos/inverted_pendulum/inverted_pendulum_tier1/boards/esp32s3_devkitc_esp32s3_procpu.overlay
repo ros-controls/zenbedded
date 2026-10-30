@@ -1,46 +1,76 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/led/led.h>
 
 / {
 	aliases {
-		stepper-driver = &a4988_driver;
-		stepper-ctrl = &a4988_ctrl;
+		stepper-driver = &tmc2209_driver;
+		stepper-ctrl = &tmc2209_ctrl;
 		encoder-driver = &as5600_encoder;
+		led-strip = &led_strip;
 	};
 
-	a4988_driver: a4988-stepper-driver {
+	// a4988_driver: a4988-stepper-driver {
+	// 	compatible = "adi,tmc2209";
+	// 	en-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+	// 	micro-step-res = <16>;
+	// };
+
+	// a4988_ctrl: a4988-stepper-controller {
+	// 	compatible = "zephyr,gpio-step-dir-stepper-ctrl";
+	// 	step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+	// 	dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+	// 	invert-direction;
+	// 	stepper-driver = <&a4988_driver>;
+	// 	counter = <&counter0>;
+	// };
+
+	// Enable this and replace the alias for drivers like DRVxxx and TMC2209 so you can control microstepping
+
+	tmc2209_driver: tmc2209-stepper-driver {
 		compatible = "adi,tmc2209";
-		en-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
-		micro-step-res = <16>;
+		en-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+		m0-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+		m1-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
+		micro-step-res = <32>;
 	};
 
-	a4988_ctrl: a4988-stepper-controller {
+	tmc2209_ctrl: tmc2209-stepper-controller {
 		compatible = "zephyr,gpio-step-dir-stepper-ctrl";
-		step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+		step-gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
 		dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
-		stepper-driver = <&a4988_driver>;
+		invert-direction;
+		stepper-driver = <&tmc2209_driver>;
 		counter = <&counter0>;
 	};
-
-// Enable this and replace the alias for drivers like DRVxxx and TMC2209 so you can control microstepping
-
-//	tmc2209_driver: tmc2209-stepper-driver {
-//		compatible = "adi,tmc2209";
-//		en-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
-//		m0-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
-//		m1-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
-//		micro-step-res = <32>;
-//	};
-//
-//	tmc2209_ctrl: tmc2209-stepper-controller {
-//		compatible = "zephyr,gpio-step-dir-stepper-ctrl";
-//		step-gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
-//		dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
-//		invert-direction;
-//		stepper-driver = <&tmc2209_driver>;
-//      counter = <&counter0>;
-//	};
 };
 
+&i2s0_default {
+	group1 {
+		pinmux = <I2S0_O_SD_GPIO48>;
+	};
+};
+
+i2s_led: &i2s0 {
+	status = "okay";
+
+	dmas = <&dma 3>;
+	dma-names = "tx";
+
+	led_strip: ws2812@0 {
+		compatible = "worldsemi,ws2812-i2s";
+
+		reg = <0>;
+		chain-length = <1>;
+		color-mapping = <LED_COLOR_ID_GREEN
+		                 LED_COLOR_ID_RED
+		                 LED_COLOR_ID_BLUE>;
+		reset-delay = <500>;
+	};
+};
+
+&dma {
+	status = "okay";
+};
 
 &pinctrl {
 	i2c0_default: i2c0_default {
@@ -52,7 +82,6 @@
 		};
 	};
 };
-
 
 &i2c0 {
 	status = "okay";
@@ -66,12 +95,6 @@
 		status = "okay";
 	};
 };
-
-
-&wifi {
-	status = "okay";
-};
-
 
 &timer0 {
 	status = "okay";
