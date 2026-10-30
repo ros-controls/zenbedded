@@ -19,6 +19,7 @@
 	// 	compatible = "zephyr,gpio-step-dir-stepper-ctrl";
 	// 	step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
 	// 	dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+	// 	invert-direction;
 	// 	stepper-driver = <&a4988_driver>;
 	// 	counter = <&counter0>;
 	// };

@@ -13,7 +13,9 @@
 // limitations under the License.
 
 #include <errno.h>
+#include <inttypes.h>
 #include <math.h>
+#include <time.h>
 #include <zenbedded_transport/generated/interface_data.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -24,33 +26,33 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/net_if.h>
+#include <zephyr/net/sntp.h>
 #include <algorithm>
-#include <zenbedded_demo_net.hpp>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <zenbedded_common/network.hpp>
 #include <zenbedded_rcl/codecs.hpp>
 #include <zenbedded_rcl/zenbedded_client.hpp>
 
 LOG_MODULE_REGISTER(inverted_pendulum_tier2, LOG_LEVEL_INF);
 
+using InvertedPendulumClient =
+  ZenbeddedClient<RawCodec<zenbedded_state_t>, RawCodec<zenbedded_command_t>>;
+
 constexpr uint32_t kControlPeriodMs = 10;
 constexpr double kControlPeriodSec = kControlPeriodMs / 1000.0;
 constexpr uint32_t kCommandTimeoutMs = 200;
-
-// A stale command must stop the stepper rather than latch the last velocity forever.
 constexpr uint32_t kCommandTimeoutCycles = kCommandTimeoutMs / kControlPeriodMs;
+constexpr uint32_t kLoopFreqHz = 100;
 
-// --- Fast encoder sampling params ---------------------------------------------
-// encoder sampling + velocity filtering runs in its own thread at kEncoderSampleHz.
+// Fast encoder sampling params
 constexpr double kEncoderSampleHz = 400.0;
 constexpr uint32_t kEncoderSamplePeriodUs = static_cast<uint32_t>(1.0e6 / kEncoderSampleHz);
 constexpr double kVelocityFilterAlpha = 0.35;
 constexpr double kVelocityFilterTauSec =
-  (1 - kVelocityFilterAlpha) / (kVelocityFilterAlpha * kEncoderSampleHz);
+  (1.0 - kVelocityFilterAlpha) / (kVelocityFilterAlpha * kEncoderSampleHz);
 
-// How far ahead of the current control cycle to project the commanded velocity
-// before clamping and issuing it as a stepper_ctrl_move_to() target. 1.0 means
-// "just enough to cover this control period"; a slightly larger value (e.g. 2-3)
-// keeps the driver's move queue topped up so consecutive retargets don't cause
-// it to decelerate to a stop between control cycles.
 constexpr double kMoveToProjectionPeriods = 2.0;
 
 BUILD_ASSERT(
@@ -59,7 +61,7 @@ BUILD_ASSERT(
 
 constexpr uint32_t motor_steps_per_rev = 200;
 constexpr uint32_t micro_step_res = DT_PROP_OR(DT_ALIAS(stepper_driver), micro_step_res, 1);
-constexpr int32_t micro_steps_per_rev = motor_steps_per_rev * micro_step_res;
+constexpr int32_t micro_steps_per_rev = static_cast<int32_t>(motor_steps_per_rev * micro_step_res);
 
 const device * stepper_driver = DEVICE_DT_GET(DT_ALIAS(stepper_driver));
 const device * stepper_ctrl = DEVICE_DT_GET(DT_ALIAS(stepper_ctrl));
@@ -75,15 +77,10 @@ bool led_ready = false;
 
 // Hard travel limit on the stepper position, measured from the boot-time zero.
 constexpr double kStepperAngleLimitRad = 135.0 * M_PI / 180.0;
-
-// Absolute microstep bounds corresponding to +-kStepperAngleLimitRad around the
-// boot-time zero. Every move_to() target is clamped into this range before being
-// sent to the driver, so the driver's own step-generation logic - not a polling
-// loop - is what actually prevents stepping past the limit.
 int32_t stepper_min_position = 0;
 int32_t stepper_max_position = 0;
 
-constexpr double kMaxAngularVelocity = 7;            // rad/s
+constexpr double kMaxAngularVelocity = 7.0;          // rad/s
 constexpr uint64_t kMinMicrostepIntervalNs = 60000;  // stepper limit
 constexpr uint64_t kMaxMicrostepIntervalNs = 1000000000;
 constexpr uint64_t kStepIntervalForMaxVelNs =
@@ -125,7 +122,7 @@ void set_stepper_angular_vel(double rads_per_sec)
     return;
   }
 
-  double microsteps_per_sec = fabs(rads_per_sec) * micro_steps_per_rev / (2 * M_PI);
+  double microsteps_per_sec = fabs(rads_per_sec) * micro_steps_per_rev / (2.0 * M_PI);
   double interval_ns = 1e9 / microsteps_per_sec;
 
   if (
@@ -183,14 +180,12 @@ bool get_encoder_angle_deg(double * angle_rad)
     return false;
   }
 
-  *angle_rad = sensor_value_to_double(&val) * M_PI / 180;
+  *angle_rad = sensor_value_to_double(&val) * M_PI / 180.0;
   return true;
 }
 
 // Enforce the hard stepper travel limit in-place. If the commanded velocity would
-// drive the stepper further past +-kStepperAngleLimitRad, it is zeroed; velocity that moves
-// the stepper back toward the allowed range is left untouched. Recomputed every control
-// cycle from the true current position, so it self-corrects rather than latching.
+// drive the stepper further past +-kStepperAngleLimitRad, it is zeroed.
 void enforce_stepper_hard_stop(double stepper_angle, double * stepper_angular_velocity)
 {
   if (
@@ -201,7 +196,7 @@ void enforce_stepper_hard_stop(double stepper_angle, double * stepper_angular_ve
   }
 }
 
-/// --- Fast encoder sampling thread -------------------------------------------
+// Fast encoder sampling thread
 struct EncoderState
 {
   double angle = 0.0;
@@ -235,7 +230,7 @@ void encoder_sample_thread_entry(void *, void *, void *)
     if (get_encoder_angle_deg(&raw_encoder_angle))
     {
       double angle =
-        wrap_angle(fmod(raw_encoder_angle - encoder_angle_offset + 3 * M_PI, 2 * M_PI));
+        wrap_angle(fmod(raw_encoder_angle - encoder_angle_offset + 3.0 * M_PI, 2.0 * M_PI));
 
       uint32_t now_us = k_cyc_to_us_floor32(k_cycle_get_32());
       double dt = static_cast<double>(now_us - prev_time_us) / 1.0e6;
@@ -283,64 +278,177 @@ k_tid_t encoder_sample_thread_tid = k_thread_create(
   K_THREAD_STACK_SIZEOF(encoder_sample_thread_stack), encoder_sample_thread_entry, nullptr, nullptr,
   nullptr, CONFIG_ENCODER_SAMPLING_THREAD_PRIORITY, 0, K_FOREVER);
 
+static int extract_host_from_locator(const char * locator, char * out_host, size_t out_len)
+{
+  if (locator == nullptr || out_host == nullptr || out_len == 0)
+  {
+    return -EINVAL;
+  }
+  const char * start = locator;
+  const char * slash = strchr(start, '/');
+  if (slash != nullptr)
+  {
+    start = slash + 1;
+  }
+  const char * colon = strchr(start, ':');
+  size_t host_len = (colon != nullptr) ? static_cast<size_t>(colon - start) : strlen(start);
+  if (host_len >= out_len)
+  {
+    return -ENOSPC;
+  }
+  memcpy(out_host, start, host_len);
+  out_host[host_len] = '\0';
+  return 0;
+}
+
+static bool sync_time_from_ntp(const char * ntp_host)
+{
+  if (ntp_host == nullptr || ntp_host[0] == '\0')
+  {
+    LOG_WRN("No NTP host specified, skipping time synchronization");
+    return false;
+  }
+
+  LOG_INF("Synchronizing time with NTP server '%s'...", ntp_host);
+  sntp_time sntp_time;
+  int rc = sntp_simple(ntp_host, 5000, &sntp_time);
+  if (rc < 0)
+  {
+    LOG_ERR("NTP sync failed with server '%s': %d", ntp_host, rc);
+    return false;
+  }
+
+  timespec ts{};
+  ts.tv_sec = sntp_time.seconds;
+  ts.tv_nsec = ((uint64_t)sntp_time.fraction * 1000000000ULL) >> 32;
+
+  if (clock_settime(CLOCK_REALTIME, &ts) == 0)
+  {
+    tm timeinfo;
+    gmtime_r(&ts.tv_sec, &timeinfo);
+
+    char date_buf[32];
+    strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
+
+    LOG_INF(
+      "System time updated: %s (Epoch: %" PRIi64 "s)", date_buf, static_cast<int64_t>(ts.tv_sec));
+    return true;
+  }
+
+  LOG_ERR("Failed to set CLOCK_REALTIME");
+  return false;
+}
+
 int main()
 {
   // Set LEDs to Blue for the Setup Phase
   if (device_is_ready(led))
   {
+    led_ready = true;
     pixels[0] = RGB(0x00, 0x00, 0xFF);
     led_strip_update_rgb(led, pixels, STRIP_NUM_PIXELS);
-    led_ready = true;
   }
   else
   {
-    LOG_WRN("LED device not ready");
+    LOG_WRN("LED device not ready, running without LED feedback");
   }
 
   if (!device_is_ready(stepper_driver) || !device_is_ready(stepper_ctrl))
   {
-    LOG_ERR("Stepper devices not ready\n");
+    LOG_ERR("Stepper devices not ready");
     return 0;
   }
 
   if (!device_is_ready(encoder_driver))
   {
-    LOG_ERR("Encoder device not ready\n");
+    LOG_ERR("Encoder device not ready");
     return 0;
   }
-  else
-  {
-    k_thread_start(encoder_sample_thread_tid);
-  }
 
-  k_sem_take(&g_pendulum_ready, K_FOREVER);
-
-  LOG_INF("Starting Inverted Pendulum Tier2");
-  net_if * iface = net_if_get_default();
-  if (int net_err = zenbedded::demo::init_network(iface); net_err != 0)
+  LOG_INF("Starting Inverted Pendulum Tier 2");
+  if (int net_err = zenbedded::common::init_network(); net_err != 0)
   {
     LOG_ERR("Failed to initialize network interface: %d", net_err);
     return net_err;
   }
 
-  static ZenbeddedClient<RawCodec<zenbedded_state_t>, RawCodec<zenbedded_command_t> > client;
+  static InvertedPendulumClient client;
   int ret = -1;
+  const char * selected_locator = ZENBEDDED_DEFAULT_LOCATOR;
+#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
+  char usb_loc[32] = {0};
+#endif
   uint32_t init_timer = k_uptime_get_32();
+
   while (k_uptime_get_32() - init_timer < 10000)
   {
-    ret = client.init(100);
-    if (ret == 0)
+#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC)
+    if (zenbedded::common::is_usbd_ready())
     {
-      break;
+      if (
+        zenbedded::common::get_usb_peer_locator(
+          ZENBEDDED_DEFAULT_LOCATOR, usb_loc, sizeof(usb_loc)) == 0)
+      {
+        LOG_INF("Attempting Zenoh connection over USB CDC ECM (%s)...", usb_loc);
+        ret = client.init(kLoopFreqHz, usb_loc);
+        if (ret == 0)
+        {
+          selected_locator = usb_loc;
+          break;
+        }
+        LOG_WRN("Failed to connect via USB CDC ECM (%s): %d", usb_loc, ret);
+      }
     }
+#endif
+
+#if defined(CONFIG_ZENBEDDED_COMMON_WIFI)
+    if (ret != 0 && zenbedded::common::is_wifi_ready())
+    {
+      LOG_INF("Attempting Zenoh connection over Wi-Fi (%s)...", ZENBEDDED_DEFAULT_LOCATOR);
+      ret = client.init(kLoopFreqHz, ZENBEDDED_DEFAULT_LOCATOR);
+      if (ret == 0)
+      {
+        selected_locator = ZENBEDDED_DEFAULT_LOCATOR;
+        break;
+      }
+    }
+#endif
+
+    if (ret != 0)
+    {
+      ret = client.init(kLoopFreqHz, ZENBEDDED_DEFAULT_LOCATOR);
+      if (ret == 0)
+      {
+        selected_locator = ZENBEDDED_DEFAULT_LOCATOR;
+        break;
+      }
+    }
+
     LOG_WRN("Retrying ZenbeddedClient initialization...");
     k_sleep(K_MSEC(500));
   }
+
   if (ret != 0)
   {
     LOG_ERR("Failed to initialize ZenbeddedClient: %d", ret);
     return ret;
   }
+
+  // Synchronize system clock with host Chrony NTP server extracted from selected locator
+  char ntp_host[64];
+  if (extract_host_from_locator(selected_locator, ntp_host, sizeof(ntp_host)) == 0)
+  {
+    if (!sync_time_from_ntp(ntp_host))
+    {
+      LOG_WRN("Continuing without NTP sync; state timestamps will use local uptime");
+    }
+  }
+
+  // Start fast magnetic encoder sampling thread and await calibration
+  k_thread_start(encoder_sample_thread_tid);
+  LOG_INF("Waiting for the pendulum to calibrate zero...");
+  k_sem_take(&g_pendulum_ready, K_FOREVER);
+  LOG_INF("Pendulum zero calibrated successfully!");
 
   ret = stepper_enable(stepper_driver);
   if (ret != 0)
@@ -350,12 +458,11 @@ int main()
   }
 
   int32_t stepper_position = 0;
-  double stepper_angle = 0;
-  double stepper_angle_offset = 0;
-  double stepper_angular_velocity = 0;
+  double stepper_angle = 0.0;
+  double stepper_angle_offset = 0.0;
+  double stepper_angular_velocity = 0.0;
 
-  // Zero reference for the stepper: whatever position it is in at boot becomes 0,
-  // so all reported/limited angles are relative to where the robot was powered on.
+  // Zero reference for stepper at boot
   ret = stepper_ctrl_get_actual_position(stepper_ctrl, &stepper_position);
   if (ret != 0)
   {
@@ -401,19 +508,20 @@ int main()
       .motor_joint_position = stepper_angle,
       .motor_joint_velocity = motor_joint_velocity,
       .pendulum_joint_position = encoder_state.angle,
-      .pendulum_joint_velocity = encoder_state.velocity};
+      .pendulum_joint_velocity = encoder_state.velocity,
+    };
 
     if (++print_count == 100)
     {
       print_count = 0;
       printk(
         "stepper_angle=%.4f rad, stepper_vel=%.4f rad/s, "
-        "encoder_angle=%.4f rad, encoder_vel=%.4f rad/s\n, loop_freq=%.2f Hz",
+        "encoder_angle=%.4f rad, encoder_vel=%.4f rad/s, loop_freq=%.2f Hz\n",
         stepper_angle, motor_joint_velocity, encoder_state.angle, encoder_state.velocity,
         loop_freq);
     }
 
-    zenbedded_command_t cmd_val;
+    zenbedded_command_t cmd_val{};
 
     client.write_state(state_val);
 
@@ -438,8 +546,7 @@ int main()
       stepper_angular_velocity = 0.0;
     }
 
-    // Integrate the (possibly stale-but-not-yet-timed-out) commanded acceleration into
-    // velocity every control cycle, not just when a new command arrives.
+    // Integrate commanded acceleration into velocity every control cycle
     stepper_angular_velocity += commanded_acceleration * kControlPeriodSec;
     stepper_angular_velocity =
       std::clamp(stepper_angular_velocity, -kMaxAngularVelocity, kMaxAngularVelocity);
@@ -456,7 +563,7 @@ int main()
       led_strip_update_rgb(led, pixels, STRIP_NUM_PIXELS);
     }
 
-    // ensure kControlPeriodMs loop timing
+    // Ensure drift-free kControlPeriodMs loop timing
     uint32_t loop_duration_ms = k_uptime_get_32() - loop_start_ms;
     uint32_t sleep_ms =
       (loop_duration_ms < kControlPeriodMs) ? kControlPeriodMs - loop_duration_ms : 1;

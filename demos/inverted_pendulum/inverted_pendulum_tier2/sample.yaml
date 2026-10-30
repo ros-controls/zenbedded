@@ -2,15 +2,17 @@ sample:
   name: Inverted Pendulum Tier2 Demo
 common:
   build_only: true
-  tags: zenoh
+  tags: zenbedded
 tests:
   sample.zenbedded.inverted_pendulum_tier2.wifi:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
-    extra_args:
-      - -DSNIPPET=wifi
+    extra_args: SNIPPET=wifi
   sample.zenbedded.inverted_pendulum_tier2.usb_cdc:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
-    extra_args:
-      - -DSNIPPET=cdc-ecm
+    extra_args: SNIPPET=cdc-ecm
+  sample.zenbedded.inverted_pendulum_tier2.dual:
+    platform_allow:
+      - esp32s3_devkitc/esp32s3/procpu
+    extra_args: SNIPPET="cdc-ecm;wifi"

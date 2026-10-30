@@ -1,14 +1,15 @@
-menu "Inverted Pendulum Tier1 Demo"
+menu "Inverted Pendulum Tier 1 Demo"
 
-config NTP_SERVER
-    string "ip address of ntp server"
-    default "192.0.2.1" if ZENBEDDED_DEMO_COMM_USB_CDC
-    default "10.251.102.128" if ZENBEDDED_DEMO_COMM_WIFI
-    default "127.0.0.1"
+config ENCODER_SAMPLING_THREAD_PRIORITY
+    int "Priority for the magnetic encoder's sampling thread"
+    default 0
 
-config ZENBEDDED_ZENOH_IP_PORT
-    default "192.0.2.1:7447" if ZENBEDDED_DEMO_COMM_USB_CDC
-    default "10.251.102.128:7447" if ZENBEDDED_DEMO_COMM_WIFI
+config ZENBEDDED_ZENOH_LOCATOR
+    string "Zenoh Target Locator"
+    default "192.0.2.1:7447" if ZENBEDDED_COMMON_USB_CDC
+    default "127.0.0.1:7447"
+    help
+      Network endpoint locator for the Zenoh router (e.g. 192.168.1.50:7447 or 192.0.2.1:7447).
 
 endmenu
 
