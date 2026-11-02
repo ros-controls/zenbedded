@@ -1,0 +1,5 @@
+name: zenbedded
+build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig
+
