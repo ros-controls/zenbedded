@@ -29,9 +29,9 @@ SineWaveTier1Node::SineWaveTier1Node(const rclcpp::NodeOptions & options)
   joint_name_ = this->declare_parameter<std::string>("joint_name", "sine_wave");
   interface_name_ = this->declare_parameter<std::string>("interface_name", "amplitude");
   amplitude_ = this->declare_parameter<double>("amplitude", 5.0);
-  frequency_ = this->declare_parameter<double>("frequency", 0.2);
+  frequency_ = this->declare_parameter<double>("frequency", 0.4);
   offset_ = this->declare_parameter<double>("offset", 5.0);
-  publish_rate_ = this->declare_parameter<double>("publish_rate", 100.0);
+  publish_rate_ = this->declare_parameter<double>("publish_rate", 50.0);
 
   publisher_ = this->create_publisher<control_msgs::msg::JointCommand>(topic_name_, 10);
 
