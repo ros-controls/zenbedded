@@ -28,7 +28,7 @@ controller_interface::CallbackReturn SineWaveTier2Controller::on_init()
     auto_declare<std::string>("component_name", "sine_wave");
     auto_declare<std::string>("cmd_interface_name", "amplitude");
     auto_declare<double>("amplitude", 5.0);
-    auto_declare<double>("frequency", 2.0);
+    auto_declare<double>("frequency", 0.4);
     auto_declare<double>("offset", 0.0);
   }
   catch (const std::exception & e)

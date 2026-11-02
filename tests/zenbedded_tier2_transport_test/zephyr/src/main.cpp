@@ -74,7 +74,7 @@ int main(void)
 
   if (
     zenbedded_transport_init(
-      0, "mcu", CONFIG_ZENBEDDED_ZENOH_MODE, CONFIG_ZENBEDDED_ZENOH_IP_PORT) != 0)
+      0, "mcu", CONFIG_ZENBEDDED_ZENOH_MODE, CONFIG_ZENBEDDED_ZENOH_LOCATOR) != 0)
   {
     LOG_ERR("Failed to initialize transport");
     return -1;

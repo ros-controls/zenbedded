@@ -42,12 +42,15 @@ The firmware generates a sinusoidal wave signal (`position = amplitude * sin(2 *
 On your Host PC, start the Zenoh router. If using `rmw_zenoh_cpp`:
 
 ```bash
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 export ZENOH_CONFIG_OVERRIDE='mode="peer";listen/endpoints=["tcp/0.0.0.0:7447"]'
 export RUST_LOG=zenoh=debug
 ros2 run rmw_zenoh_cpp rmw_zenohd
 ```
 
 *(Alternatively, run the standalone router: `zenohd --listen tcp/0.0.0.0:7447`).*
+
+> **Note:** Every host terminal that runs ROS 2 commands for this demo (router, launch files, `ros2 topic` CLI) needs `export RMW_IMPLEMENTATION=rmw_zenoh_cpp`. Add it to your `~/.bashrc` to make it permanent.
 
 ---
 
@@ -60,7 +63,7 @@ The firmware defaults to `127.0.0.1:7447` in `prj.conf`.
 To avoid committing personal network IPs to version control, supply the host IP via an `extra.conf` file:
 
 ```ini
-CONFIG_ZENBEDDED_ZENOH_LOCATOR="192.168.1.50:7447"
+CONFIG_ZENBEDDED_ZENOH_LOCATOR="127.0.0.1:7447"
 ```
 
 And pass `-- -DEXTRA_CONF_FILE=extra.conf` when building. *(Alternatively, edit `prj.conf` directly for local testing)*.
@@ -70,6 +73,8 @@ And pass `-- -DEXTRA_CONF_FILE=extra.conf` when building. *(Alternatively, edit 
 ## Step 3: Building and Flashing (Firmware)
 
 ### For ESP32-S3 DevKitC
+
+Run these commands from the root of the `zenbedded` repository (the demo paths are relative to it):
 
 ```bash
 # Option A: Wired USB CDC ECM (Ethernet over USB)
@@ -95,7 +100,7 @@ Open a serial monitor (e.g., `tio /dev/ttyACM1` or `picocom -b 115200 /dev/ttyAC
 
 ```text
 wifi cred add -s "<MY_WIFI_SSID>" -k 1 -p "<MY_WIFI_PASSWORD>"
-wifi cred auto_connect on
+wifi cred auto_connect
 ```
 
 Credentials are saved in non-volatile flash storage (NVS) and persist across power cycles.
@@ -108,7 +113,7 @@ Build the host ROS 2 package:
 
 ```bash
 cd <ros2_ws>
-colcon build --packages-select zenbedded_sine_wave zenbedded_hardware_interface zenbedded_transport
+colcon build --packages-select zenbedded_sine_wave zenbedded_hardware_interface
 source install/setup.bash
 ```
 
@@ -186,11 +191,12 @@ To configure your host laptop to serve NTP persistently in the background:
    allow 192.0.2.0/24
 
    # Allow queries from local LAN / Wi-Fi subnet
-   allow 10.0.0.0/8
+   allow 127.0.0.1
 
    # Serve local time even when disconnected from internet upstream
    local stratum 10
    ```
+   Replace `127.0.0.1` with your Wi-Fi subnet (shown by `ip addr`) so the ESP32 can reach the NTP server.
 
 3. Enable Chrony to run permanently in the background as a systemd service:
    ```bash

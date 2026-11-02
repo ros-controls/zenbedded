@@ -10,7 +10,7 @@ controller_manager:
 
 sine_wave_tier2:
   ros__parameters:
-    hardware_component: sine_wave
+    component_name: sine_wave
     cmd_interface_name: amplitude
     amplitude: 5.0
     frequency: 0.4 #hz
