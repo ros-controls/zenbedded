@@ -69,7 +69,7 @@ manifest:
   projects:
     - name: zenbedded
       url: https://github.com/ros-controls/zenbedded
-      revision: zenbedded-as-zephyr-module
+      revision: master
       path: external/zenbedded
       import:
         path-prefix: external
