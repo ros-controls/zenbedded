@@ -13,8 +13,9 @@
 # limitations under the License.
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
 from launch.conditions import IfCondition, UnlessCondition
+from launch.event_handlers import OnProcessStart
 from launch.substitutions import Command, LaunchConfiguration, PathSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -35,6 +36,24 @@ def generate_launch_description():
             value_type=str,
         )
     }
+
+    control_node = Node(
+        package="controller_manager",
+        executable="ros2_control_node",
+        parameters=[controllers_yaml],
+        output="screen",
+        condition=UnlessCondition(is_tier1),
+    )
+    spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "sine_wave_tier2",
+            "joint_state_broadcaster",
+            "--param-file",
+            controllers_yaml,
+        ],
+    )
 
     return LaunchDescription(
         [
@@ -81,22 +100,11 @@ def generate_launch_description():
                 parameters=[robot_description],
                 condition=UnlessCondition(is_tier1),
             ),
-            Node(
-                package="controller_manager",
-                executable="ros2_control_node",
-                parameters=[controllers_yaml],
-                output="screen",
-                condition=UnlessCondition(is_tier1),
-            ),
-            Node(
-                package="controller_manager",
-                executable="spawner",
-                arguments=[
-                    "sine_wave_tier2",
-                    "joint_state_broadcaster",
-                    "--param-file",
-                    controllers_yaml,
-                ],
+            control_node,
+            # Spawn controllers only once the controller manager process is up, so slow
+            # machines do not hit the spawner timeout.
+            RegisterEventHandler(
+                OnProcessStart(target_action=control_node, on_start=[spawner]),
                 condition=UnlessCondition(is_tier1),
             ),
             Node(

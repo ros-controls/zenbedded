@@ -49,9 +49,16 @@ Start the Zenoh router on your Host PC:
 
 .. code-block:: bash
 
+    export RMW_IMPLEMENTATION=rmw_zenoh_cpp
     export ZENOH_CONFIG_OVERRIDE='mode="peer";listen/endpoints=["tcp/0.0.0.0:7447"]'
     export RUST_LOG=zenoh=debug
     ros2 run rmw_zenoh_cpp rmw_zenohd
+
+.. note::
+
+    Every host terminal that runs ROS 2 commands for this demo (router, launch files,
+    ``ros2 topic`` CLI) needs ``export RMW_IMPLEMENTATION=rmw_zenoh_cpp``. Add it to your
+    ``~/.bashrc`` to make it permanent.
 
 Configure Firmware Target Locator
 ---------------------------------
@@ -65,14 +72,15 @@ To avoid committing personal network IPs to version control, supply the host IP 
 
 .. code-block:: ini
 
-    CONFIG_ZENBEDDED_ZENOH_LOCATOR="192.168.1.50:7447"
+    CONFIG_ZENBEDDED_ZENOH_LOCATOR="127.0.0.1:7447"
 
 And pass ``-- -DEXTRA_CONF_FILE=extra.conf`` when building. *(Alternatively, edit prj.conf directly during local testing)*.
 
 Building and Flashing Firmware
 ------------------------------
 
-For ESP32-S3 DevKitC:
+For ESP32-S3 DevKitC, run these commands from the root of the ``zenbedded`` repository
+(the demo paths are relative to it):
 
 .. code-block:: bash
 
@@ -97,9 +105,8 @@ Open a serial monitor (e.g., ``tio /dev/ttyACM1``) and add your Wi-Fi credential
 
 .. code-block:: text
 
-    wifi_cred add -s "<MY_WIFI_SSID>" -p "<MY_WIFI_PASSWORD>"
-    wifi_cred set_default 0
-    wifi_cred auto_connect
+    wifi cred add -s "<MY_WIFI_SSID>" -k 1 -p "<MY_WIFI_PASSWORD>"
+    wifi cred auto_connect
 
 Credentials persist in NVS across power cycles.
 
@@ -110,8 +117,8 @@ Build the ROS 2 workspace:
 
 .. code-block:: bash
 
-    cd ~/zephyr_ws/ros2_ws
-    colcon build --packages-select zenbedded_sine_wave zenbedded_hardware_interface zenbedded_transport
+    cd <ros2_ws>
+    colcon build --packages-select zenbedded_sine_wave zenbedded_hardware_interface
     source install/setup.bash
 
 Tier 1 Execution (ROS 2 CDR)
@@ -226,10 +233,13 @@ Configure Chrony on the Host
        allow 192.0.2.0/24
 
        # Allow queries from local LAN / Wi-Fi subnet
-       allow 10.0.0.0/8
+       allow 127.0.0.1
 
        # Serve local time even when disconnected from internet upstream
        local stratum 10
+
+   Replace ``127.0.0.1`` with your Wi-Fi subnet (shown by ``ip addr``) so the ESP32 can
+   reach the NTP server.
 
 3. Ensure Chrony runs persistently in the background as a systemd service:
 

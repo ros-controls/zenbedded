@@ -225,7 +225,7 @@ int main()
 
     client.write_state(state);
 
-    k_sleep(K_MSEC(10));
+    k_sleep(K_MSEC(1000 / loop_freq));
   }
 
   client.destroy();
