@@ -82,7 +82,10 @@ configure the host Chrony daemon to serve local subnets. In ``/etc/chrony/chrony
 .. code-block:: text
 
     allow 192.0.2.0/24
-    allow 192.168.0.0/16
+    allow 127.0.0.1
+
+Replace ``127.0.0.1`` with your Wi-Fi subnet (shown by ``ip addr``) so the ESP32 can
+reach the NTP server.
 
 Then restart the service:
 
