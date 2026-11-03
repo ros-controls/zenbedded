@@ -28,7 +28,7 @@ ZenbeddedClientBase::ZenbeddedClientBase() { reset_buffers(); }
 ZenbeddedClientBase::~ZenbeddedClientBase() { destroy(); }
 
 int ZenbeddedClientBase::init_base(
-  uint32_t control_freq, size_t state_payload_size, size_t cmd_payload_size)
+  uint32_t control_freq, size_t state_payload_size, size_t cmd_payload_size, const char * locator)
 {
   if (initialized_)
   {
@@ -54,10 +54,11 @@ int ZenbeddedClientBase::init_base(
     return -ENOMEM;
   }
 
+  const char * effective_locator = locator ? locator : ZENBEDDED_DEFAULT_LOCATOR;
   if (
     zenbedded_transport_init(
       CONFIG_ZENBEDDED_DOMAIN_ID, CONFIG_ZENBEDDED_NODE_NAME, CONFIG_ZENBEDDED_ZENOH_MODE,
-      CONFIG_ZENBEDDED_ZENOH_IP_PORT) != 0)
+      effective_locator) != 0)
   {
     LOG_ERR("Failed to initialize zenbedded transport");
     return -EIO;

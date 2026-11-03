@@ -15,7 +15,7 @@
             <plugin>zenbedded_hardware_interface/ZenbeddedHardware</plugin>
             <param name="schema_path">$(find zenbedded_sine_wave)/config/interface_schema.yaml</param>
             <param name="zenoh_mode">client</param>
-            <param name="zenoh_endpoint">tcp/10.70.246.128:7447</param>
+            <param name="zenoh_endpoint">tcp/127.0.0.1:7447</param>
             <param name="state_topic">zenbedded/sine_wave/state</param>
             <param name="command_topic">zenbedded/sine_wave/cmd</param>
         </hardware>
