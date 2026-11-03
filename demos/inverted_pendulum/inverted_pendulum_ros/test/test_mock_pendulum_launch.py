@@ -48,7 +48,7 @@ def generate_test_description():
                         "launch/inverted_pendulum.launch.py",
                     )
                 ),
-                launch_arguments={"use_mock_hardware": "True"}.items(),
+                launch_arguments={"use_mock_hardware": "True", "use_rviz": "False"}.items(),
             ),
             ReadyToTest(),
         ]

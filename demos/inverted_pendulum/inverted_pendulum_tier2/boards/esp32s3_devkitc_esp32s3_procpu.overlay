@@ -19,6 +19,7 @@
 	// 	compatible = "zephyr,gpio-step-dir-stepper-ctrl";
 	// 	step-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
 	// 	dir-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+	// 	invert-direction;
 	// 	stepper-driver = <&a4988_driver>;
 	// 	counter = <&counter0>;
 	// };
@@ -40,11 +41,6 @@
 		invert-direction;
 		stepper-driver = <&tmc2209_driver>;
 	    counter = <&counter0>;
-	};
-
-	cdc_ecm_eth0: cdc_ecm_eth0 {
-		compatible = "zephyr,cdc-ecm-ethernet";
-		remote-mac-address = "00005E005301";
 	};
 };
 
@@ -102,9 +98,6 @@ i2s_led: &i2s0 {
 };
 
 
-&wifi {
-	status = "okay";
-};
 
 
 &timer0 {
