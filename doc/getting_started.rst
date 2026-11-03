@@ -11,7 +11,7 @@ This guide walks you through setting up Zenbedded end-to-end.
 Prerequisites
 -------------
 
-- ROS 2 Lyrical (see :ref:`supported_distributions` for Kilted and Jazzy)
+- ROS 2 Lyrical (see :ref:`supported_distributions` for Jazzy)
 - A Zephyr-supported board (ESP32-S3 reference target)
 - ``west`` installed and configured
 

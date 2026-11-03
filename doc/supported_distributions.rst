@@ -24,11 +24,6 @@ zenoh-pico fork).
      - CI: binary build against ``main`` and ``testing``
      - CI: ``native_sim`` run, ESP32-S3 build
      - **Supported**
-   * - **Kilted**
-     - ``master``
-     - Source build only
-     - Source build only
-     - **Not validated**
    * - **Jazzy**
      - ``master``
      - Source build only
@@ -48,7 +43,7 @@ Support levels
 
 **Not validated**
    Builds from the same sources, but no CI lane exists yet and the combination has
-   not been validated end-to-end. CI coverage for Kilted and Jazzy is planned for
+   not been validated end-to-end. CI coverage for Jazzy is planned for
    after the first release.
 
 **Unsupported**
@@ -82,13 +77,13 @@ Build from source:
    source install/setup.bash
 
 
-Kilted
-------
+Jazzy
+-----
 
 Not validated. The host packages use ``ros2_control`` interfaces that are present in
-Kilted, so a source build is expected to work; it is not covered by CI, and no
-end-to-end run is part of the test matrix. Set ``ROS_DISTRO`` to the distribution
-you are building for (``kilted`` here):
+Jazzy, so a source build is expected to work; it is not covered by CI, and no
+end-to-end run is part of the test matrix. The firmware side is unaffected. Set
+``ROS_DISTRO`` to the distribution you are building for (``jazzy`` here):
 
 .. code-block:: bash
 
@@ -101,18 +96,9 @@ you are building for (``kilted`` here):
    colcon build --packages-select zenbedded_hardware_interface zenbedded_transport
    source install/setup.bash
 
-The Docker development image is Lyrical-based. For Kilted, build the host packages
-natively or derive an image from ``ros:kilted-ros-base`` with the packages listed in
+The Docker development image is Lyrical-based. For Jazzy, build the host packages
+natively or derive an image from ``ros:jazzy-ros-base`` with the packages listed in
 :ref:`docker_userdoc`.
-
-
-Jazzy
------
-
-Not validated, with the same caveats as Kilted: source build expected, no CI lane,
-no end-to-end validation. The firmware side is unaffected.
-
-Follow the `Kilted`_ build steps above with ``ROS_DISTRO`` set to ``jazzy``.
 
 
 Firmware on any distro
