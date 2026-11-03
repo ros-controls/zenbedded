@@ -1,0 +1,3 @@
+rsource "../zenbedded_transport/Kconfig"
+rsource "../zenbedded_rcl/Kconfig"
+rsource "../zenbedded_common/Kconfig"

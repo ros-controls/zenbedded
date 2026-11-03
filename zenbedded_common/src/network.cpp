@@ -45,9 +45,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-#include <cctype>
-#include <cstdio>
-#include <cstring>
+#include <ctype.h>
+#include <stdio.h>
+#include <string.h>
 
 LOG_MODULE_REGISTER(zenbedded_net, LOG_LEVEL_INF);
 
