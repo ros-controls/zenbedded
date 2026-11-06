@@ -14,6 +14,7 @@
 
 #include "zenbedded_transport/serialization.h"
 
+#include <errno.h>
 #include <string.h>
 
 // Note: Layout writes assume a little-endian host, matching the CDR_LE encapsulation.
@@ -27,10 +28,100 @@
 
 static const uint8_t kCdrHeader[CDR_HEADER_SIZE] = {0x00, 0x01, 0x00, 0x00};
 
-void zcdr_init_joint_state(
-  zcdr_joint_state_ctx_t * ctx, const char * frame_id, const char ** joint_names,
-  uint32_t num_joints, uint8_t * out_buffer)
+// Validate the complete layout before writing any template bytes or context offsets.
+static bool reserve_bytes(size_t * cursor, size_t capacity, size_t alignment, size_t size)
 {
+  size_t padding = (alignment - (*cursor - CDR_HEADER_SIZE) % alignment) % alignment;
+  if (*cursor > capacity || padding > capacity - *cursor || size > capacity - *cursor - padding)
+  {
+    return false;
+  }
+  *cursor += padding + size;
+  return true;
+}
+
+static bool reserve_string(size_t * cursor, size_t capacity, const char * value)
+{
+  if (!reserve_bytes(cursor, capacity, 4, sizeof(uint32_t)))
+  {
+    return false;
+  }
+  size_t remaining = capacity - *cursor;
+  size_t length = 0;
+  if (value)
+  {
+    while (length < remaining && length < UINT32_MAX && value[length] != '\0')
+    {
+      length++;
+    }
+  }
+  if (length == remaining || length == UINT32_MAX)
+  {
+    return false;
+  }
+  *cursor += length + 1;
+  return true;
+}
+
+static int check_layout(
+  const char * frame_id, const char ** joint_names, uint32_t num_joints,
+  const char * interface_name, size_t num_arrays, size_t capacity)
+{
+  if (num_joints && !joint_names)
+  {
+    return -EINVAL;
+  }
+  if (capacity < CDR_HEADER_SIZE || num_joints > capacity / sizeof(double) / num_arrays)
+  {
+    return -ENOMEM;
+  }
+  size_t cursor = CDR_HEADER_SIZE;
+  if (
+    !reserve_bytes(&cursor, capacity, 1, 8) || !reserve_string(&cursor, capacity, frame_id) ||
+    !reserve_bytes(&cursor, capacity, 4, sizeof(uint32_t)))
+  {
+    return -ENOMEM;
+  }
+  for (uint32_t i = 0; i < num_joints; i++)
+  {
+    if (!joint_names[i])
+    {
+      return -EINVAL;
+    }
+    if (!reserve_string(&cursor, capacity, joint_names[i]))
+    {
+      return -ENOMEM;
+    }
+  }
+  if (num_arrays == 1 && !reserve_string(&cursor, capacity, interface_name))
+  {
+    return -ENOMEM;
+  }
+  for (size_t i = 0; i < num_arrays; i++)
+  {
+    if (
+      !reserve_bytes(&cursor, capacity, 4, sizeof(uint32_t)) ||
+      !reserve_bytes(&cursor, capacity, 8, (size_t)num_joints * sizeof(double)))
+    {
+      return -ENOMEM;
+    }
+  }
+  return 0;
+}
+
+int zcdr_init_joint_state(
+  zcdr_joint_state_ctx_t * ctx, const char * frame_id, const char ** joint_names,
+  uint32_t num_joints, uint8_t * out_buffer, size_t buffer_size)
+{
+  if (!ctx || !out_buffer)
+  {
+    return -EINVAL;
+  }
+  int ret = check_layout(frame_id, joint_names, num_joints, NULL, 3, buffer_size);
+  if (ret != 0)
+  {
+    return ret;
+  }
   ctx->num_joints = num_joints;
   size_t cursor = 0;
 
@@ -73,23 +164,24 @@ void zcdr_init_joint_state(
   cursor += 4;
   cursor = ALIGN_UP(cursor, 8);
   ctx->offset_position = cursor;
-  cursor += (8 * num_joints);
+  cursor += ((size_t)num_joints * sizeof(double));
 
   cursor = ALIGN_UP(cursor, 4);
   memcpy(&out_buffer[cursor], &num_joints, 4);
   cursor += 4;
   cursor = ALIGN_UP(cursor, 8);
   ctx->offset_velocity = cursor;
-  cursor += (8 * num_joints);
+  cursor += ((size_t)num_joints * sizeof(double));
 
   cursor = ALIGN_UP(cursor, 4);
   memcpy(&out_buffer[cursor], &num_joints, 4);
   cursor += 4;
   cursor = ALIGN_UP(cursor, 8);
   ctx->offset_effort = cursor;
-  cursor += (8 * num_joints);
+  cursor += ((size_t)num_joints * sizeof(double));
 
   ctx->payload_size = cursor;
+  return 0;
 }
 
 void zcdr_serialize_joint_state(
@@ -99,7 +191,7 @@ void zcdr_serialize_joint_state(
   memcpy(&out_buffer[ctx->offset_timestamp], &stamp_sec, 4);
   memcpy(&out_buffer[ctx->offset_timestamp + 4], &stamp_nanosec, 4);
 
-  size_t array_bytes = ctx->num_joints * 8;
+  size_t array_bytes = (size_t)ctx->num_joints * sizeof(double);
 
   if (positions)
   {
@@ -134,7 +226,7 @@ bool zcdr_deserialize_joint_state(
     memcpy(out_stamp_nanosec, &in_buffer[ctx->offset_timestamp + 4], 4);
   }
 
-  size_t array_bytes = ctx->num_joints * 8;
+  size_t array_bytes = (size_t)ctx->num_joints * sizeof(double);
 
   if (out_positions)
   {
@@ -152,10 +244,19 @@ bool zcdr_deserialize_joint_state(
   return true;
 }
 
-void zcdr_init_joint_command(
+int zcdr_init_joint_command(
   zcdr_joint_command_ctx_t * ctx, const char * frame_id, const char ** joint_names,
-  uint32_t num_joints, const char * interface_name, uint8_t * out_buffer)
+  uint32_t num_joints, const char * interface_name, uint8_t * out_buffer, size_t buffer_size)
 {
+  if (!ctx || !out_buffer)
+  {
+    return -EINVAL;
+  }
+  int ret = check_layout(frame_id, joint_names, num_joints, interface_name, 1, buffer_size);
+  if (ret != 0)
+  {
+    return ret;
+  }
   ctx->num_joints = num_joints;
   size_t cursor = 0;
 
@@ -214,9 +315,10 @@ void zcdr_init_joint_command(
 
   cursor = ALIGN_UP(cursor, 8);
   ctx->offset_values = cursor;
-  cursor += (8 * num_joints);
+  cursor += ((size_t)num_joints * sizeof(double));
 
   ctx->payload_size = cursor;
+  return 0;
 }
 
 void zcdr_serialize_joint_command(
@@ -228,7 +330,7 @@ void zcdr_serialize_joint_command(
 
   if (values)
   {
-    memcpy(&out_buffer[ctx->offset_values], values, ctx->num_joints * 8);
+    memcpy(&out_buffer[ctx->offset_values], values, (size_t)ctx->num_joints * sizeof(double));
   }
 }
 
@@ -252,7 +354,7 @@ bool zcdr_deserialize_joint_command(
 
   if (out_values)
   {
-    memcpy(out_values, &in_buffer[ctx->offset_values], ctx->num_joints * 8);
+    memcpy(out_values, &in_buffer[ctx->offset_values], (size_t)ctx->num_joints * sizeof(double));
   }
 
   return true;
