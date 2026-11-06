@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <zephyr/kernel.h>
@@ -40,6 +41,22 @@ int main()
     .joint_names = chassis_joints,
     .num_joints = 2,
     .interface_name = "position"};
+
+  // Oversized layouts must fail before transport or background threads are started.
+  auto oversized_state = state_params;
+  oversized_state.num_joints = UINT32_MAX;
+  if (client.init(100, oversized_state, cmd_params) != -ENOMEM || client.is_initialized())
+  {
+    printk("[FATAL] Oversized state layout was not rejected!\n");
+    return -1;
+  }
+  auto oversized_command = cmd_params;
+  oversized_command.num_joints = UINT32_MAX;
+  if (client.init(100, state_params, oversized_command) != -ENOMEM || client.is_initialized())
+  {
+    printk("[FATAL] Oversized command layout was not rejected!\n");
+    return -1;
+  }
 
   // Initialize Client (spawns 100Hz background publish thread automatically)
   if (client.init(100, state_params, cmd_params) != 0)
