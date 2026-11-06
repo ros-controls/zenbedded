@@ -30,7 +30,10 @@ Usage
 The ``zcdr_*`` API in ``serialization.h`` covers the CDR payload lifecycle:
 
 - ``zcdr_init_joint_state`` / ``zcdr_init_joint_command`` lay out the static
-  CDR buffer and precompute the field offsets.
+  CDR buffer and precompute the field offsets. Pass the buffer capacity as the
+  final argument and check the return value: ``0`` means success, ``-ENOMEM``
+  means the complete payload does not fit, and ``-EINVAL`` means an invalid
+  pointer was supplied. Failure leaves the buffer and context unchanged.
 - ``zcdr_serialize_joint_state`` / ``zcdr_serialize_joint_command`` fill the
   buffer with a ``JointState`` / ``JointCommand`` payload.
 - ``zcdr_deserialize_joint_state`` / ``zcdr_deserialize_joint_command`` unpack

@@ -127,13 +127,25 @@ public:
     reset_buffers();
 
     // Initialize state headers/codecs directly in double-buffer slots
-    StateCodec::init(state_ctx_, state_params, get_state_buffer_slot(0));
-    StateCodec::init(state_ctx_, state_params, get_state_buffer_slot(1));
+    for (size_t i = 0; i < 2; i++)
+    {
+      int ret = StateCodec::init(
+        state_ctx_, state_params, get_state_buffer_slot(i), CONFIG_ZENBEDDED_MAX_STATE_BUFFER_SIZE);
+      if (ret != 0)
+      {
+        return ret;
+      }
+    }
     size_t st_size = StateCodec::payload_size(state_ctx_);
 
     // Determine command payload size using scratchpad space
     uint8_t cmd_layout_scratch[CONFIG_ZENBEDDED_MAX_CMD_BUFFER_SIZE];
-    CommandCodec::init(cmd_ctx_, cmd_params, cmd_layout_scratch);
+    int ret =
+      CommandCodec::init(cmd_ctx_, cmd_params, cmd_layout_scratch, sizeof(cmd_layout_scratch));
+    if (ret != 0)
+    {
+      return ret;
+    }
     size_t cmd_size = CommandCodec::payload_size(cmd_ctx_);
 
     return init_base(control_freq, st_size, cmd_size);

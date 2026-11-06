@@ -15,6 +15,7 @@
 #ifndef ZENBEDDED_RCL__CODECS_HPP_
 #define ZENBEDDED_RCL__CODECS_HPP_
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -36,10 +37,11 @@
 //                    like frame_id, joint_names, ...). Can be an empty struct.
 //   Value         -- the value passed to write() / populated by read().
 //
-//   static void init(Ctx &, const InitParams &, uint8_t * buf);
+//   static int init(Ctx &, const InitParams &, uint8_t * buf, size_t capacity);
 //       Called once (per double-buffer slot) during ZenbeddedClient::init(). May write a
 //       persistent template into `buf` (e.g. Tier 1's CDR header/field names) that write()
 //       will patch on every call rather than rewrite from scratch -- see JointStateCodec.
+//       Returns 0 on success or a negative errno; must reject oversized layouts before writing.
 //   static size_t payload_size(const Ctx &);
 //       Wire size in bytes. Fixed after init() for the lifetime of the client.
 //
@@ -72,10 +74,10 @@ private:
 
   // clang-format off
   template <typename C>
-  static auto check_state_codec(int) -> decltype(C::init(declval_helper<typename C::Ctx &>(), declval_helper<const typename C::InitParams &>(), static_cast<uint8_t *>(nullptr)), C::payload_size(declval_helper<const typename C::Ctx &>()), C::write(declval_helper<const typename C::Ctx &>(), declval_helper<const typename C::Value &>(), static_cast<uint8_t *>(nullptr)), true_type{}); // NOLINT
+  static auto check_state_codec(int) -> decltype(C::init(declval_helper<typename C::Ctx &>(), declval_helper<const typename C::InitParams &>(), static_cast<uint8_t *>(nullptr), size_t{0}), C::payload_size(declval_helper<const typename C::Ctx &>()), C::write(declval_helper<const typename C::Ctx &>(), declval_helper<const typename C::Value &>(), static_cast<uint8_t *>(nullptr)), true_type{}); // NOLINT
 
   template <typename C>
-  static auto check_command_codec(int) -> decltype(C::init(declval_helper<typename C::Ctx &>(), declval_helper<const typename C::InitParams &>(), static_cast<uint8_t *>(nullptr)), C::payload_size(declval_helper<const typename C::Ctx &>()), C::read(declval_helper<const typename C::Ctx &>(), static_cast<const uint8_t *>(nullptr), size_t{0}, declval_helper<typename C::Value &>()), true_type{}); // NOLINT
+  static auto check_command_codec(int) -> decltype(C::init(declval_helper<typename C::Ctx &>(), declval_helper<const typename C::InitParams &>(), static_cast<uint8_t *>(nullptr), size_t{0}), C::payload_size(declval_helper<const typename C::Ctx &>()), C::read(declval_helper<const typename C::Ctx &>(), static_cast<const uint8_t *>(nullptr), size_t{0}, declval_helper<typename C::Value &>()), true_type{}); // NOLINT
   // clang-format on
 
   template <typename>
@@ -106,7 +108,10 @@ struct RawCodec
 
   using Value = T;
 
-  static void init(Ctx &, const InitParams &, uint8_t *) {}
+  static int init(Ctx &, const InitParams &, uint8_t *, size_t capacity)
+  {
+    return sizeof(T) <= capacity ? 0 : -ENOMEM;
+  }
 
   static size_t payload_size(const Ctx &) { return sizeof(T); }
 
@@ -146,9 +151,9 @@ struct JointStateCodec
     const double * efforts;
   };
 
-  static void init(Ctx & ctx, const InitParams & p, uint8_t * buf)
+  static int init(Ctx & ctx, const InitParams & p, uint8_t * buf, size_t capacity)
   {
-    zcdr_init_joint_state(&ctx, p.frame_id, p.joint_names, p.num_joints, buf);
+    return zcdr_init_joint_state(&ctx, p.frame_id, p.joint_names, p.num_joints, buf, capacity);
   }
 
   static size_t payload_size(const Ctx & ctx) { return ctx.payload_size; }
@@ -180,9 +185,10 @@ struct JointCommandCodec
     double * values;
   };
 
-  static void init(Ctx & ctx, const InitParams & p, uint8_t * buf)
+  static int init(Ctx & ctx, const InitParams & p, uint8_t * buf, size_t capacity)
   {
-    zcdr_init_joint_command(&ctx, p.frame_id, p.joint_names, p.num_joints, p.interface_name, buf);
+    return zcdr_init_joint_command(
+      &ctx, p.frame_id, p.joint_names, p.num_joints, p.interface_name, buf, capacity);
   }
 
   static size_t payload_size(const Ctx & ctx) { return ctx.payload_size; }
