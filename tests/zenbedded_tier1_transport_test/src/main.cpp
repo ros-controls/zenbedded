@@ -63,7 +63,7 @@ int main(void)
   if (
     zenbedded_transport_init(
       CONFIG_ZENBEDDED_DOMAIN_ID, CONFIG_ZENBEDDED_NODE_NAME, CONFIG_ZENBEDDED_ZENOH_MODE,
-      CONFIG_ZENBEDDED_ZENOH_IP_PORT) != 0)
+      CONFIG_ZENBEDDED_ZENOH_LOCATOR) != 0)
   {
     printf("[FATAL] Transport init failed!\n");
     return -1;
