@@ -1,0 +1,4 @@
+manifest:
+  self:
+    import:
+      - zenbedded_transport/west.yml

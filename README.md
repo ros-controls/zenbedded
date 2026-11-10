@@ -41,7 +41,7 @@ Zephyr v4.4.2 and the ros-controls `zenoh-pico` fork are pinned in
 [`docker/image-west.yml`](docker/image-west.yml) and
 [`zenbedded_transport/west.yml`](zenbedded_transport/west.yml) respectively.
 
-## Quick start
+## Quick start - tinkering with Zenbedded itself
 
 The development image provides ROS 2 Lyrical, `ros2_control`, Zephyr, and zenoh-pico.
 
@@ -59,6 +59,28 @@ CI also exports the dev container as a pre-built image --
 Then follow [Getting Started](doc/getting_started.rst) to build the host packages and
 flash a demo, and the [inverted pendulum docs](demos/inverted_pendulum/doc/userdoc.rst)
 to run it (add `use_mock_hardware:=true` to the launch command to run without an MCU).
+
+## Quick start - usage of Zenbedded in your project
+
+Use Zenbedded as [Zephyr module](https://docs.zephyrproject.org/latest/develop/modules.html). For such use case, your `west.yml` should be along the lines:
+
+```yml
+manifest:
+  projects:
+    - name: zenbedded
+      url: https://github.com/ros-controls/zenbedded
+      revision: master
+      path: external/zenbedded
+      import:
+        path-prefix: external
+
+    - name: zephyr
+      url: https://github.com/zephyrproject-rtos/zephyr
+      revision: v4.4.2
+      import:
+        path-prefix: external
+
+```
 
 ## Documentation
 
