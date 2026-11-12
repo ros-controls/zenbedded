@@ -50,11 +50,11 @@ zenbedded_transport
 zenbedded_rcl **[WIP]**
     An embedded client library for Zephyr RTOS that provides a high-level,
     ROS-like API for hardware components running on the MCU. The
-    ``ZenbeddedClient`` (double-buffered state/command buffers with
-    ABA-prevention versioning, Zenoh publish/subscribe, optional control
-    thread) is implemented and ready for use. A ``HardwareComponent`` base
-    class (lifecycle-managed sensor/actuator) and ``ComponentManager`` are
-    planned but not yet implemented. Communicates directly with the host over
+    ``ZenbeddedClient`` (spinlock-guarded double-buffered state/command
+    buffers, Zenoh publish/subscribe, optional control thread) is
+    implemented and ready for use. ``HardwareComponent``, controllers and a
+    ``ControllerManager`` / ``ResourceManager`` are proposed but not yet
+    implemented. Communicates directly with the host over
     Zenoh without any intermediate agent. See the detailed
     :ref:`rcl_architecture` document for the full embedded ``ros2_control``
     specification and multi-frequency execution models.

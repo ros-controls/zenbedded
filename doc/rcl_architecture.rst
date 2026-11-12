@@ -5,624 +5,1122 @@
 Embedded ros2_control Architecture (zenbedded_rcl)
 ===================================================
 
-This document specifies the architectural design for bringing the core abstractions of
-``ros2_control`` into embedded firmware running on `Zephyr RTOS`_ via ``zenbedded_rcl``.
-It details how the hardware abstraction layer (``HardwareComponent``), embedded controllers
-(``ControllerInterface``), the orchestrator (``ControllerManager``), compile-time hardware
-definitions (`Zephyr Devicetree`_), and the asynchronous multi-channel pub/sub communication
-subsystem interface with one another.
+.. note::
 
-Furthermore, this document explores multi-rate execution scenarios and RTOS scheduling models
-where physical sensors, actuators, control loops, and network telemetry execute at distinct
-update frequencies.
+   **Status: proposal and delivery plan.** Nothing in sections 4–8 is implemented yet.
+   Section 11 lays out the phased plan to get there.
+   ``zenbedded_rcl/include/zenbedded_rcl/hardware_component.hpp`` is an empty header.
+   The "Today" column in :ref:`rcl_arch_status` lists what does exist.
+
+This document proposes how to bring the core ``ros2_control`` abstractions onto
+`Zephyr RTOS`_ microcontrollers in ``zenbedded_rcl``. These are hardware components,
+controllers, a controller manager and the lifecycle that ties them together. The goal is
+that a developer who knows ``ros2_control`` can read MCU code and recognise every concept.
+Where the MCU version has to differ (no heap, no ``pluginlib``, no URDF parsing at boot,
+several rate domains), the reason is stated in the relevant section.
 
 .. contents:: Table of Contents
    :depth: 2
    :local:
 
 
-1. Motivation & Embedded Control Philosophy
---------------------------------------------
+1. Motivation
+-------------
 
-In standard desktop ROS 2 deployments, `ros2_control`_ orchestrates hardware drivers and
-controllers on Linux. While powerful, traditional ROS 2 control architectures rely heavily on:
+Host-side ``ros2_control`` relies on dynamic allocation, runtime URDF parsing, ``pluginlib``
+(``dlopen``) and a single ``update()`` loop. None of those fit an MCU:
 
-- Dynamic memory allocation (``std::vector``, heap strings, shared pointers)
-- Runtime XML parsing (URDF parsing via ``urdfdom`` / ``tinyxml2``)
-- Dynamic plugin loading via ``pluginlib`` (``dlopen``)
-- Heavyweight DDS/XRCE middleware daemons and agents
+- **Bounded RAM and flash.** Allocating after boot risks heap fragmentation.
+- **Determinism.** Encoder sampling, step generation and balance loops must not wait on
+  network I/O or heap locks.
+- **Agent-less transport.** The MCU talks to the host directly over `Zenoh`_, with no
+  XRCE agent in between.
 
-Microcontrollers (such as the ESP32-S3, STM32, or NXP microcontrollers) operating close to physical
-hardware have strict constraints:
+An embedded ``ros2_control`` layer buys three things:
 
-- **Bounded RAM & Flash**: Heap allocations during execution are dangerous and prone to fragmentation.
-- **Microsecond Determinism**: Low-level motor commutation, current loops, and encoder sampling require
-  hard real-time scheduling that must never be delayed by network I/O or heap locks.
-- **Direct Agent-less Wire Protocol**: Bypassing intermediate host bridge daemons via `Zenoh`_.
-
-By introducing an embedded ``ros2_control``-compatible architecture directly into ``zenbedded_rcl``:
-
-1. **Local Closed-Loop Autonomy**: High-rate feedback loops (e.g., 400 Hz velocity filtering, 1 kHz current
-   control, or balance stabilization) execute locally on the microcontroller with zero network latency.
-2. **Fail-Safe Supervisory Execution**: Safety limits, watchdog clamps, and emergency stops operate on-chip
-   even if the wireless or serial connection to the host drops.
-3. **Decoupled Telemetry**: State publications to host ROS 2 nodes are downsampled and emitted over Zenoh
-   without introducing jitter into the physical actuator control loops.
+1. **Local closed loops.** Fast loops (400 Hz filtering, 1 kHz velocity PID, balancing)
+   run on the MCU with no network latency.
+2. **Local safety.** Command watchdogs, travel limits and safe-stop keep working when the
+   Wi-Fi or USB link drops.
+3. **Decoupled telemetry.** State goes to the host at its own, lower rate without
+   adding jitter to the actuator loop.
 
 
-2. System Architecture Overview
---------------------------------
+.. _rcl_arch_status:
 
-The architecture establishes a unified pipeline from physical silicon registers to host ROS 2 nodes:
+2. Status and Scope
+-------------------
+
+**Baseline.** This document assumes PR #106 (multi-publisher / multi-subscriber API) is
+merged before any of this work starts. "Today" therefore means ``master`` plus PR #106.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * - Concept
+     - Today (``master`` + PR #106)
+     - Proposed here
+   * - Hardware access
+     - Hand-written in each demo ``main.cpp`` (``stepper_ctrl_*``, AS5600 thread)
+     - ``HardwareComponent`` instances generated from Devicetree
+   * - State/command exchange with host
+     - ``ZenbeddedNode`` with ``ZenbeddedPublisher<Codec>`` /
+       ``ZenbeddedSubscriber<Codec>``, each with its own ``DoubleByteBuffer``. The
+       demos still use the older ``ZenbeddedClient``
+     - Unchanged API. Broadcaster/forwarder controllers are built on the publisher and
+       subscriber
+   * - Cross-thread buffers
+     - ``DoubleBuffer`` / ``DoubleByteBuffer`` guarded by ``k_spinlock``
+       (lock-free version replaced in ``27e22ea``)
+     - Same primitive, used only at rate-domain boundaries
+   * - Command watchdog
+     - Per demo (``kCommandTimeoutMs`` in the inverted pendulum)
+     - Owned by ``ControllerManager``
+   * - Control law (inverted pendulum)
+     - Runs **on the host** (``inverted_pendulum_controller``). MCU integrates the
+       commanded acceleration
+     - Can optionally move onto the MCU as an embedded controller
+   * - Subscriber callbacks / periodic publish
+     - Subscriber callbacks run in the zenoh-pico read task. Periodic publish uses
+       ``k_work_delayable`` on the system workqueue (``ZenbeddedClient``: its own
+       ``k_thread``)
+     - Dispatched by ``ZenbeddedExecutor`` (issue #120, section 8)
+
+**Out of scope:**
+
+- Current/FOC loops above ~2 kHz. These stay inside the motor driver (timer ISR or DMA)
+  and appear to the framework as an ``effort`` or ``velocity`` command interface.
+- Runtime plugin loading.
+- URDF on the MCU.
+- ROS 2 actions on the MCU.
+
+
+3. System Overview
+------------------
 
 .. code-block:: text
 
-   +----------------------------------------------------------------------------------------------------+
-   |                                   ZEPHYR RTOS EMBEDDED SYSTEM                                      |
-   |                                                                                                    |
-   |   [ Zephyr Devicetree (DT) ] ─────────────────────────┐ (Compile-time static binding)              |
-   |                                                       ▼                                            |
-   |   +--------------------------------------------------------------------------------------------+   |
-   |   | zenbedded_rcl ControllerManager                                                            |   |
-   |   |                                                                                            |   |
-   |   |   +────────────────────────────────────────────────────────────────────────────────────+   |   |
-   |   |   | Interface Repository (Static Views)                                                |   |   |
-   |   |   |   • State Interfaces:   [ motor_joint/pos, motor_joint/vel, pendulum/pos, ... ]    |   |   |
-   |   |   |   • Command Interfaces: [ motor_joint/accel, motor_joint/vel, ... ]                |   |   |
-   |   |   +────────────────────────────────────────────────────────────────────────────────────+   |   |
-   |   |                                 ▲                                    │                     |   |
-   |   |             read() (writes SI)  │                                    │ write() (reads CI)  |   |
-   |   |                                 │                                    ▼                     |   |
-   |   |   +─────────────────────────────┴──────+     +───────────────────────┴─────────────────+   |   |
-   |   |   | Hardware Components (Devicetree)   |     | Embedded Controller Interfaces          |   |   |
-   |   |   |   • ActuatorComponent (stepper)    |     |   • InvertedPendulumController (100Hz)  |   |   |
-   |   |   |   • SensorComponent (AS5600 400Hz) |     |   • SafetyClampController (1kHz)        |   |   |
-   |   |   |   • SensorComponent (IMU 200Hz)    |     |   • JointStateBroadcaster (100Hz)       |   |   |
-   |   |   |   • SensorComponent (Battery 1Hz)  |     |   • CommandSubscriberController (100Hz) |   |   |
-   |   |   +────────────────────────────────────+     +─────────────────────────────────────────+   |   |
-   |   |                                                                      │                     |   |
-   |   |   +──────────────────────────────────────────────────────────────────┴─────────────────+   |   |
-   |   |   | Multi-Rate Dispatcher (Rational Decimation or Preemptive RTOS Threads)             |   |   |
-   |   |   +──────────────────────────────────────────────────────────────────┬─────────────────+   |   |
-   |   +──────────────────────────────────────────────────────────────────────┼─────────────────────+   |
-   |                                                                          │                         |
-   |                                        Lock-free Double Buffering (ABA)  │                         |
-   |                                                                          ▼                         |
-   |   +--------------------------------------------------------------------------------------------+   |
-   |   | zenbedded_rcl Multi-Channel Pub/Sub Subsystem                                              |   |
-   |   |   • Channel 1 (Pub): "rt/robot/joint_states"   (100 Hz, Tier 1 CDR or Tier 2 packed)       |   |
-   |   |   • Channel 2 (Sub): "rt/robot/joint_commands" (100 Hz, Tier 1 CDR or Tier 2 packed)       |   |
-   |   |   • Channel 3 (Pub): "rt/robot/imu/data"       (200 Hz, Tier 1 sensor_msgs/Imu)            |   |
-   |   |   • Channel 4 (Pub): "rt/robot/diagnostics"    (1 Hz, system health & battery voltage)     |   |
-   |   +----------------------------------------------------------------------┬─────────────────────+   |
-   +──────────────────────────────────────────────────────────────────────────┼─────────────────────────+
-                                                                              │
-                                                         Zenoh Transport Mesh │ (UDP / TCP / USB-CDC)
-                                                                              ▼
-   +----------------------------------------------------------------------------------------------------+
-   |                               HOST COMPUTER (Linux / ROS 2 Jazzy)                                  |
-   |                                                                                                    |
-   |   +────────────────────────────────────────────────────────────────────────────────────────────+   |
-   |   | zenbedded_hardware_interface (SystemInterface) OR topic_based_hardware_interface           |   |
-   |   |   • Lock-free realtime_tools::RealtimeThreadSafeBox ingest from Zenoh subscribers          |   |
-   |   |   • Emits joint commands directly to Zenoh publisher                                       |   |
-   |   +──────────────────────────────────────────────┬─────────────────────────────────────────────+   |
-   |                                                  │                                                 |
-   |   +──────────────────────────────────────────────┴─────────────────────────────────────────────+   |
-   |   | Host controller_manager                                                                    |   |
-   |   |   • JointTrajectoryController / DiffDriveController / Nav2 / MoveIt                        |   |
-   |   +--------------------------------------------------------------------------------------------+   |
-   +----------------------------------------------------------------------------------------------------+
+   ┌───────────────────────── Zephyr MCU (zenbedded_rcl) ─────────────────────────┐
+   │                                                                              │
+   │  Devicetree ─(compile time)─► ResourceManager                                │
+   │                                ├─ HardwareComponents (actuators, sensors)    │
+   │                                └─ Interfaces (state / command / reference)   │
+   │                                     ▲ read()             │ write() + limits  │
+   │                                     │                    ▼                   │
+   │  ControllerManager ─ owns ─► RateDomains (thread + period each)              │
+   │                                └─ per tick: read → update → write            │
+   │                                                                              │
+   │  Controllers: joint_state_broadcaster, forward_command_controller, pid, ...  │
+   │       │ (broadcasters / forwarders only)                                     │
+   │       ▼                                                                      │
+   │  DoubleBuffer<T> ◄─► ZenbeddedExecutor / pub-sub ◄─► zenbedded_transport     │
+   └───────────────────────────────────────┬──────────────────────────────────────┘
+                                           │ Zenoh over UDP / TCP / USB CDC-ECM
+   ┌──────────────────────── Host (ROS 2 Jazzy) ──────────────────────────────────┐
+   │  zenbedded_hardware_interface ◄─► controller_manager ◄─► host controllers    │
+   └──────────────────────────────────────────────────────────────────────────────┘
+
+The MCU-side names deliberately match the host-side ones. They are ``ResourceManager``,
+``ControllerManager``, state/command/reference interfaces, ``on_configure`` and so on. The
+earlier name ``ComponentManager`` is dropped: its job is ``ResourceManager``.
 
 
-3. Zephyr Devicetree (zephyr dt) Hardware Binding
--------------------------------------------------
+4. Devicetree: Hardware and Controller Declaration
+--------------------------------------------------
 
-In desktop ``ros2_control``, hardware joints and interfaces are declared dynamically in a URDF file.
-In Zephyr, the hardware source of truth is the **Devicetree**.
+On the host, joints and interfaces come from the ``<ros2_control>`` tag in the URDF, and
+controllers come from ``controllers.yaml``. On the MCU, Devicetree takes both roles. It
+declares rate domains, hardware components and **controller instances** under one
+``ros2-control`` node. Controllers are software nodes, the same way Zephyr declares
+``gpio-keys`` or input processors.
 
-Devicetree bindings allow the board author to map physical MCU peripherals (timers, PWMs, I2C devices,
-GPIO step/dir controllers) directly into named joints and interfaces at compile time.
+Kconfig only decides which controller *types* are compiled in, and it does that
+automatically (4.5). A controller type is never compiled unless an enabled node uses
+it.
 
-3.1 Devicetree Node Bindings
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+4.1 Bindings
+^^^^^^^^^^^^
 
-We specify four custom Devicetree bindings under ``dts/bindings/zenbedded/``:
+All bindings live in ``zenbedded_rcl/dts/bindings/``. ``zephyr/module.yml`` gains
+``settings: dts_root: .`` so the build finds them.
 
-1. ``zenbedded,controller-manager.yaml``:
-   Root container defining base update frequency, thread priorities, and stack allocations.
-2. ``zenbedded,joint-actuator.yaml``:
-   Represents an actuator joint (motor, stepper, servo). Links to a physical Zephyr driver, declares
-   joint name, exported state interfaces, and accepted command interfaces.
-3. ``zenbedded,joint-sensor.yaml``:
-   Represents a joint sensor (optical/magnetic encoder, potentiometer). Declares joint name,
-   sampling frequency, and filtering options.
-4. ``zenbedded,imu-sensor.yaml``:
-   Represents a 6-DOF or 9-DOF IMU sensor. Declares frame ID, gyro/accel channels, and update rate.
+**Framework and hardware**
 
-3.2 Example Devicetree Overlay Snippet
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+``zenbedded,controller-manager``
+   Root node. Its children are rate domains, hardware components and controllers.
+``zenbedded,rate-domain``
+   ``update-rate`` (Hz), ``priority``, ``stack-size``. Each domain becomes one thread.
+``zenbedded,joint-actuator``
+   ``joint-name``, ``driver`` (phandle), ``state-interfaces``, ``command-interfaces``,
+   ``domain`` (phandle), limits.
+``zenbedded,joint-sensor``
+   ``joint-name``, ``sensor`` (phandle), ``state-interfaces``, ``domain``, filter options.
+``zenbedded,imu-sensor``
+   ``frame-id``, ``sensor`` (phandle), ``domain``.
 
-Below is a representative overlay configuring a rotary inverted pendulum with an AS5600 magnetic encoder
-and a TMC2209 stepper driver:
+**Controllers**
+
+Every controller binding includes ``zenbedded,controller-common.yaml``:
+
+- ``domain`` (phandle, required): the rate domain the controller runs in.
+- ``update-rate`` (Hz, optional): must divide the domain rate. It defaults to the
+  domain rate.
+- ``inactive-at-boot`` (bool): when set, autostart configures the controller but does
+  not activate it. Use this for alternative controllers that claim the same
+  interfaces.
+- ``chained-to`` (phandle, optional): the downstream chainable controller whose
+  reference interfaces this controller writes (6.3).
+
+The P0/P1 types each add their own properties:
+
+``zenbedded,joint-state-broadcaster``
+   ``interfaces`` (string array of ``joint/iface``), ``channel`` (string).
+``zenbedded,forward-command-controller``
+   ``joints`` (string array), ``interface-name`` (string), ``channel`` (string),
+   ``command-timeout-ms``.
+``zenbedded,pid-controller``
+   ``joints``, ``command-interface``, ``state-interface``, ``kp-micro``, ``ki-micro``,
+   ``kd-micro``, ``i-clamp-micro``, ``feedforward`` (bool).
+``zenbedded,imu-sensor-broadcaster``
+   ``sensor`` (phandle to a ``zenbedded,imu-sensor``), ``channel``.
+
+**Application controllers**
+
+Controllers specific to one application, such as the pendulum's LQR, use exactly the
+same mechanism. The application ships its own binding in its ``dts/bindings/`` (for
+example ``app,inverted-pendulum-controller``) and defines the type with the same macro
+(5.5). There is no separate path for application controllers.
+
+Devicetree has no floating point, so every physical quantity is an integer in
+**micro-units** (µrad, µrad/s, µrad/s², µN·m). Property names carry the unit, e.g.
+``max-velocity-urad-s``, so nobody has to guess the scale factor.
+
+4.2 Example (inverted pendulum, TMC2209 + AS5600)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: dts
 
    / {
        ros2_control: ros2-control {
            compatible = "zenbedded,controller-manager";
-           update-rate = <100>; /* Base loop frequency in Hz */
 
-           /* Actuator: Motor Arm */
+           fast: domain-fast {
+               compatible = "zenbedded,rate-domain";
+               update-rate = <400>;
+               priority = <2>;
+           };
+           control: domain-control {
+               compatible = "zenbedded,rate-domain";
+               update-rate = <100>;
+               priority = <4>;
+           };
+
            motor_arm: actuator-0 {
                compatible = "zenbedded,joint-actuator";
                joint-name = "motor_joint";
-               driver = <&a4988_ctrl>;
+               driver = <&tmc2209_ctrl>;
+               domain = <&control>;
                state-interfaces = "position", "velocity";
-               command-interfaces = "velocity", "acceleration";
-               max-velocity = <7000>;      /* 7.0 rad/s * 1000 */
-               max-acceleration = <30000>; /* 30.0 rad/s^2 * 1000 */
-               update-rate = <100>;
+               command-interfaces = "acceleration";
+               max-velocity-urad-s = <7000000>;      /* 7.0 rad/s   */
+               max-acceleration-urad-s2 = <30000000>; /* 30.0 rad/s² */
+               position-limits-urad = <(-2356194) 2356194>; /* ±135° */
            };
 
-           /* Sensor: Fast Pendulum Encoder */
            pendulum_encoder: sensor-0 {
                compatible = "zenbedded,joint-sensor";
                joint-name = "pendulum_joint";
                sensor = <&as5600_encoder>;
+               domain = <&fast>;
                state-interfaces = "position", "velocity";
-               update-rate = <400>; /* Fast sampling at 400 Hz */
-               filter-alpha = <350>; /* Low-pass filter alpha = 0.35 */
+               velocity-filter-alpha-permille = <350>;
+           };
+
+           jsb: controller-0 {
+               compatible = "zenbedded,joint-state-broadcaster";
+               domain = <&control>;
+               update-rate = <50>;
+               interfaces = "motor_joint/position", "motor_joint/velocity",
+                            "pendulum_joint/position", "pendulum_joint/velocity";
+               channel = "zenbedded/inverted_pendulum/state";
+           };
+
+           fwd: controller-1 {
+               compatible = "zenbedded,forward-command-controller";
+               domain = <&control>;
+               joints = "motor_joint";
+               interface-name = "acceleration";
+               channel = "zenbedded/inverted_pendulum/cmd";
+               command-timeout-ms = <200>;
            };
        };
    };
 
-3.3 Compile-Time Static Instantiation
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+4.3 Static instantiation
+^^^^^^^^^^^^^^^^^^^^^^^^
 
-Rather than parsing string names or XML trees at boot, Zephyr C preprocessor macros iterate over
-the Devicetree at compile time:
+Each component type is instantiated **per compatible**, not per child. Iterating
+``DT_FOREACH_CHILD`` with a single type's macro would also try to build sensor nodes
+as actuators.
 
 .. code-block:: cpp
 
-   #define INIT_ACTUATOR_COMPONENT(node_id) \
-     ActuatorComponent( \
-       DT_PROP(node_id, joint_name), \
-       DEVICE_DT_GET(DT_PHANDLE(node_id, driver)), \
-       DT_PROP(node_id, update_rate)),
+   #define DT_DRV_COMPAT zenbedded_joint_actuator
 
-   static ActuatorComponent g_actuators[] = {
-     DT_FOREACH_CHILD_STATUS_OKAY_VARGS(DT_NODELABEL(ros2_control), INIT_ACTUATOR_COMPONENT)
-   };
+   #define ZB_ACTUATOR_DEFINE(inst)                                          \
+     static StepperActuator zb_actuator_##inst{                             \
+       DT_INST_PROP(inst, joint_name),                                       \
+       DEVICE_DT_GET(DT_INST_PHANDLE(inst, driver)),                         \
+       ZB_LIMITS_FROM_DT(inst)};                                             \
+     ZB_COMPONENT_REGISTER(zb_actuator_##inst, DT_INST_PHANDLE(inst, domain));
 
-This guarantees:
+   DT_INST_FOREACH_STATUS_OKAY(ZB_ACTUATOR_DEFINE)
 
-- **Zero dynamic memory allocation** during initialization.
-- **Immediate validation**: Compilation fails if a referenced hardware device (e.g. ``<&a4988_ctrl>``)
-  is missing or disabled in Devicetree.
-- **ROM-placement** of all invariant metadata (joint strings, maximum limits, device pointers).
+``ZB_COMPONENT_REGISTER`` places a descriptor in a Zephyr iterable section
+(``STRUCT_SECTION_ITERABLE``). The resource manager then finds every component with
+``STRUCT_SECTION_FOREACH`` and needs no hand-maintained array. This gives:
+
+- no allocation;
+- a build failure if a referenced device is missing or disabled;
+- joint names, limits and device pointers placed in flash.
+
+Controllers are instantiated the same way, with one ``DT_DRV_COMPAT`` per controller
+type (5.5).
+
+4.4 Build-time checks
+^^^^^^^^^^^^^^^^^^^^^
+
+Because hardware and controllers are both in Devicetree, most configuration errors
+become compile errors instead of boot-time failures. ``BUILD_ASSERT`` / ``static_assert``
+checks in the generated tables cover:
+
+- Each controller's ``update-rate`` divides its domain's rate.
+- Every ``joint/iface`` named by a controller is exported by some component. String
+  literals from ``DT_PROP`` are compared as ``constexpr std::string_view``.
+- No two controllers that are active at boot (no ``inactive-at-boot``) claim the same
+  command interface.
+- No command interface is written from two domains (5.4).
+- A ``chained-to`` target is a chainable type, and the chain has no cycles.
+
+Conflicts involving ``inactive-at-boot`` controllers are checked at activation time,
+the same way ``ros2_control`` does. Activation then returns ``-EBUSY``.
+
+4.5 Kconfig coupling
+^^^^^^^^^^^^^^^^^^^^
+
+Zephyr generates a ``DT_HAS_<COMPAT>_ENABLED`` Kconfig symbol for every compatible
+that has an enabled node. Each controller type's symbol defaults to that symbol, so
+using a controller in the overlay is all it takes to compile it:
+
+.. code-block:: kconfig
+
+   config ZENBEDDED_CONTROLLER_PID
+       bool "pid_controller"
+       default y
+       depends on DT_HAS_ZENBEDDED_PID_CONTROLLER_ENABLED
+
+Kconfig keeps only global settings:
+
+- ``CONFIG_ZENBEDDED_RCL_DOUBLE``
+- executor thread options
+- maximum interfaces
+- ``CONFIG_ZENBEDDED_CM_AUTOSTART``
 
 
-4. Component & Controller Abstractions
---------------------------------------
+5. Abstractions
+---------------
 
-4.1 HardwareComponent Hierarchy
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+5.1 Dispatch without ``virtual``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The embedded hardware abstraction mirrors the ``ros2_control`` lifecycle while remaining lightweight:
+``zenbedded_rcl`` has a zero-vtable rule (see ``ZenbeddedSubscriberBase``). Components and
+controllers follow the same pattern Zephyr device drivers use. Each concrete type
+provides one ``constexpr`` ops table in flash. Each instance stores a pointer to its
+table plus its own state. Every operation returns ``0`` or a negative ``errno``.
 
 .. code-block:: cpp
 
    namespace zenbedded
    {
 
-   enum class LifecycleState : uint8_t {
-     UNCONFIGURED,
-     INACTIVE,
-     ACTIVE,
-     FINALIZED,
-     ERROR
+   using time_point = k_ticks_t;   // 64-bit, monotonic; no 71-minute wrap like uint32_t µs
+   using duration = k_ticks_t;
+
+   struct ComponentOps
+   {
+     int (*on_configure)(HardwareComponent &);
+     int (*on_activate)(HardwareComponent &);
+     int (*on_deactivate)(HardwareComponent &);
+     int (*on_cleanup)(HardwareComponent &);
+     int (*on_error)(HardwareComponent &);          // must leave actuators in a safe state
+     int (*read)(HardwareComponent &, time_point, duration);
+     int (*write)(HardwareComponent &, time_point, duration);
    };
 
    class HardwareComponent
    {
    public:
-     virtual ~HardwareComponent() = default;
-
-     virtual int on_init() = 0;
-     virtual int on_configure() = 0;
-     virtual int on_activate() = 0;
-     virtual int on_deactivate() = 0;
-
-     virtual int read(uint32_t timestamp_us) = 0;
-     virtual int write(uint32_t timestamp_us) = 0;
-
      [[nodiscard]] LifecycleState state() const { return state_; }
      [[nodiscard]] const char * name() const { return name_; }
+     // Non-virtual forwarding helpers, e.g. int read(time_point t, duration d)
+     //   { return ops_->read(*this, t, d); }
 
    protected:
-     const char * name_ = nullptr;
+     constexpr HardwareComponent(const ComponentOps * ops, const char * name)
+     : ops_(ops), name_(name) {}
+
+   private:
+     const ComponentOps * ops_;
+     const char * name_;
      LifecycleState state_ = LifecycleState::UNCONFIGURED;
    };
 
    }  // namespace zenbedded
 
-4.2 Interface Views (StateInterfaceView & CommandInterfaceView)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+A ``CRTP`` helper (``ComponentBase<Derived>``) builds the ops table from member functions.
+Concrete components then look like ordinary classes. Controllers use the same scheme
+with a ``ControllerOps`` table whose ``update(time_point, duration)`` replaces
+``read``/``write``.
 
-In desktop ``ros2_control``, ``StateInterface`` and ``CommandInterface`` wrap a double pointer.
-In ``zenbedded_rcl``, we maintain strict cache locality using static interface views:
+5.2 Lifecycle
+^^^^^^^^^^^^^
+
+States and transitions mirror ``rclcpp_lifecycle`` as used by ``ros2_control``:
+
+.. code-block:: text
+
+                 on_configure            on_activate
+   UNCONFIGURED ─────────────► INACTIVE ────────────► ACTIVE
+        ▲          on_cleanup     │  ▲   on_deactivate   │
+        └─────────────────────────┘  └───────────────────┘
+   any state ── error return ──► on_error ──► UNCONFIGURED (success) | FINALIZED (failure)
+
+Rules:
+
+- **Ordering.** On activation, hardware goes first, then controllers. On deactivation and
+  error, controllers stop first, then hardware. A controller may activate only once every
+  interface it claims belongs to an ACTIVE component.
+- **Who drives transitions.** At boot, ``ControllerManager`` runs
+  configure→activate for everything automatically (``CONFIG_ZENBEDDED_CM_AUTOSTART``).
+  At runtime, the host's ``zenbedded_hardware_interface::on_activate()`` /
+  ``on_deactivate()`` can request the same transitions over a Zenoh control channel.
+  This keeps the host lifecycle and the MCU lifecycle consistent.
+- **Real-time context.** Only ``read``/``write``/``update`` run in rate-domain threads.
+  Lifecycle callbacks run in the manager thread and may block, for example to probe an
+  I2C device.
+
+5.3 Interfaces
+^^^^^^^^^^^^^^
+
+ros2_control has three interface kinds, and so does the MCU:
+
+- **State interfaces**: written by a component in ``read()``, read by controllers.
+- **Command interfaces**: written by exactly one active controller, consumed by a
+  component in ``write()``.
+- **Reference interfaces**: exported by a *chainable* controller as its input, so an
+  upstream controller can write to them. This is how cascades are built (6.3).
+
+Interfaces are identified by ``joint_name/interface_name``, e.g. ``motor_joint/velocity``.
+These strings match the host's names exactly, so ``controllers.yaml`` can be read across.
+Each name is resolved once to an index during ``on_configure``. The real-time path never
+compares strings.
 
 .. code-block:: cpp
 
-   namespace zenbedded
-   {
+   using real_t = ZB_REAL_T;   // float by default; double with CONFIG_ZENBEDDED_RCL_DOUBLE
 
-   enum class InterfaceType : uint8_t {
-     POSITION,
-     VELOCITY,
-     ACCELERATION,
-     EFFORT,
-     CUSTOM
-   };
-
-   struct StateInterfaceView
-   {
-     const char * joint_name;
-     InterfaceType type;
-     const double * value_ptr;
-
-     double get_value() const { return *value_ptr; }
-   };
-
-   struct CommandInterfaceView
-   {
-     const char * joint_name;
-     InterfaceType type;
-     double * value_ptr;
-
-     void set_value(double val) { *value_ptr = val; }
-     double get_value() const { return *value_ptr; }
-   };
-
-   }  // namespace zenbedded
-
-4.3 Embedded ControllerInterface
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-An embedded controller executes local algorithms and claims specific interfaces:
-
-.. code-block:: cpp
-
-   namespace zenbedded
-   {
-
-   class ControllerInterface
+   class StateInterfaceHandle
    {
    public:
-     virtual ~ControllerInterface() = default;
-
-     virtual int on_init() = 0;
-     virtual int on_configure() = 0;
-     virtual int on_activate() = 0;
-     virtual int on_deactivate() = 0;
-
-     /// Real-time control loop computation
-     virtual int update(uint32_t time_us, uint32_t period_us) = 0;
-
-     virtual uint32_t update_frequency() const = 0;
+     [[nodiscard]] real_t get() const { return *value_; }
+   private:
+     const real_t * value_;
    };
 
-   }  // namespace zenbedded
+   class CommandInterfaceHandle
+   {
+   public:
+     void set(real_t v) { *value_ = v; }
+     [[nodiscard]] real_t get() const { return *value_; }
+   private:
+     real_t * value_;
+   };
 
-Special Infrastructure Controllers:
+``float`` is the default because many targets (ESP32-S3 LX7, Cortex-M4F) only have a
+single-precision FPU. On those chips, ``double`` arithmetic is emulated in software and
+costs roughly 10–50× more in a 1 kHz loop. Values become ``double`` only in the codec,
+where ``sensor_msgs/JointState`` requires it.
 
-- **``JointStateBroadcaster``**: Claims read-only ``StateInterfaceView`` entries and copies their
-  values into the ``zenbedded_rcl`` publisher double buffer.
-- **``CommandSubscriberController``**: Reads from the ``zenbedded_rcl`` subscriber double buffer and
-  writes target values to claimed ``CommandInterfaceView`` entries.
+5.4 Data ownership across rate domains
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-4.4 ControllerManager Orchestration
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Handles are plain pointers. They are only safe when reader and writer run in the
+**same** thread. A 32-bit core cannot load a ``double`` atomically, and neither can a
+``float`` struct, so "atomic slot updates" across threads are not possible.
 
-The ``ControllerManager`` coordinates:
+The rule:
 
-1. **Interface Claiming & Mutual Exclusion**: Ensures that only one active controller can write to a
-   given ``CommandInterfaceView`` at any time.
-2. **Lifecycle Transitions**: Executes coordinated transitions across all registered components.
-3. **Deterministic Execution Loop**:
-   - ``read_hardware()``: Polls active components.
-   - ``update_controllers()``: Executes active control algorithms.
-   - ``write_hardware()``: Dispatches commands to physical actuators.
-4. **Safety Watchdog**: Zeroes actuator commands or engages dynamic braking if commands stall or a
-   hardware error flag is raised.
+1. Every interface value has exactly one owning domain, the domain of the component or
+   controller that writes it.
+2. When a value is read by another domain, the manager creates a *mirror* in the reader
+   domain. At the start of each reader tick, the manager copies the writer's latest
+   snapshot into the mirror through a ``DoubleBuffer<Snapshot>``. Only these copies take
+   the spinlock, never user code.
+3. The build fails, via a ``static_assert`` in the generated tables, if two domains
+   claim the same command interface.
 
+This rule makes the existing spinlocked ``DoubleBuffer`` sufficient. No second
+concurrency primitive is needed.
 
-5. Multi Pub/Sub Layer Integration
-----------------------------------
+5.5 Controllers
+^^^^^^^^^^^^^^^
 
-5.1 Decoupling Control Loops from Network Jitter
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Network transmission (Wi-Fi, Ethernet, USB-CDC-ECM) is inherently stochastic. Even with Zenoh's
-ultra-lean wire protocol, network retransmissions, socket buffer contention, or RF packet loss must
-**never** block the real-time control loop.
-
-To bridge the deterministic embedded control loop with the asynchronous network thread:
-
-- Every pub/sub channel utilizes **lock-free double buffering with ABA versioning**.
-- Hardware reads and controller updates write into the inactive buffer slot and atomically commit.
-- Network publisher threads read the committed active slot without taking mutexes.
-
-.. code-block:: text
-
-   [ 100 Hz Control Loop ]                        [ Zenoh Network Task ]
-              │                                              │
-              ▼                                              │
-     prepare_write_slot()                                    │
-              │                                              │
-     commit_write_slot() (atomic flip)                       │
-              │                                              ▼
-   [ DoubleBuffer: Slot 0 (Active) ] ──────────► read_state_from_buffer()
-   [ DoubleBuffer: Slot 1 (Inactive) ]                       │
-                                                             ▼
-                                                    zenoh_publish_state()
-
-5.2 Multi-Channel Topic Segregation
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Instead of forcing all MCU telemetry into a single monolithic message, ``zenbedded_rcl`` provides
-modular multi-channel pub/sub:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 15 15 50
-
-   * - Channel
-     - Type
-     - Frequency
-     - Description
-   * - ``rt/robot/joint_states``
-     - Publisher
-     - 100 Hz
-     - Primary joint feedback (position, velocity, effort). Tier 1 CDR or Tier 2 packed.
-   * - ``rt/robot/joint_commands``
-     - Subscriber
-     - 100 Hz
-     - Target commands received from host controllers.
-   * - ``rt/robot/imu/data``
-     - Publisher
-     - 200 Hz
-     - Dedicated high-rate IMU telemetry (accelerometer, gyroscope).
-   * - ``rt/robot/diagnostics``
-     - Publisher
-     - 1 Hz
-     - Low-rate health monitoring (bus voltage, motor thermals, packet drop counters).
-
-
-6. Multi-Frequency Execution Scenarios
----------------------------------------
-
-Real-world robots require multiple update frequencies across hardware devices and controllers.
-Here we analyze four core scenarios and their implementation within ``zenbedded_rcl``.
-
-6.1 Scenario 1: Fast Sensor Polling + Inner Loop vs. Downsampled Telemetry
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-- **Hardware Context**: Rotary Inverted Pendulum (Furuta Pendulum).
-- **Update Rates**:
-  - AS5600 magnetic encoder sampled at **400 Hz** (2.5 ms period).
-  - Velocity filtering (single-pole low pass filter, :math:`\alpha = 0.35`) computed at **400 Hz**.
-  - Balancing controller (LQR / PID) executed at **100 Hz** (10 ms period).
-  - Zenoh state publishing to host ROS 2 visualizer/telemetry at **50 Hz** (20 ms period).
-- **Dataflow**:
-  The 400 Hz encoder thread samples the angle and calculates velocity, storing it into the
-  ``pendulum_joint/position`` and ``pendulum_joint/velocity`` state interfaces. The 100 Hz control loop
-  reads the filtered state every 10 ms, computes motor acceleration, and applies it to the stepper.
-  The 50 Hz telemetry task decodes the state and emits a Zenoh packet every 20 ms.
-
-.. code-block:: text
-
-   Time (ms):   0    2.5   5.0   7.5   10.0  12.5  15.0  17.5  20.0
-   Encoder:     [X]───[X]───[X]───[X]───[X]───[X]───[X]───[X]───[X] (400 Hz)
-   Controller:  [X]─────────────────────[X]─────────────────────[X] (100 Hz)
-   Zenoh Pub:   [X]─────────────────────────────────────────────[X] (50 Hz)
-
-6.2 Scenario 2: Heterogeneous Hardware Bus Timings
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-- **Hardware Context**: Mobile Manipulator with diverse peripherals.
-- **Update Rates**:
-  - Motor commutation / PWM step generation: **1 kHz** (1 ms period).
-  - 6-DOF IMU (I2C/SPI FIFO interrupt): **200 Hz** (5 ms period).
-  - Smart battery monitor (SMBus/ADC): **1 Hz** (1000 ms period).
-- **Challenge**:
-  An I2C transaction reading battery voltage can block for up to 3 ms. If executed in the same loop
-  as the 1 kHz motor driver, it would cause severe timing overruns and motor stutter.
-- **Solution**:
-  Per-peripheral scheduling domains where slow sensors execute asynchronously in low-priority threads,
-  updating shared ``StateInterfaceView`` slots atomically.
-
-6.3 Scenario 3: Cascaded Multi-Rate Controllers
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-- **Hardware Context**: Direct-Drive BLDC Robotic Arm.
-- **Update Rates**:
-  - **Inner Loop**: Field-Oriented Current/Torque Controller running at **10 kHz** (Timer ISR).
-  - **Mid Loop**: Joint Velocity PID Controller running at **1 kHz**.
-  - **Outer Loop**: Cartesian Impedance / Trajectory Controller running at **100 Hz**.
-- **Solution via Chained Interfaces**:
-  The outer controller writes to a virtual command interface (target velocity). The mid-loop controller
-  claims this virtual command, computes target current, and writes to the inner loop.
-
-6.4 Scenario 4: Distributed Multi-Rate Synchronization
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-- **Hardware Context**: Host-MCU Coordinated Trajectory Tracking.
-- **Update Rates**:
-  - Host ROS 2 ``JointTrajectoryController`` publishes trajectory setpoints at **50 Hz** over Zenoh.
-  - Microcontroller runs a local cubic spline interpolator at **500 Hz** to generate smooth step pulses.
-- **Handling Packet Jitter**:
-  The MCU's ``CommandSubscriberController`` receives waypoints, places them in a ring buffer, and the
-  local 500 Hz interpolator smoothly steps towards the goal. If a packet is delayed, the local controller
-  holds acceleration limits rather than halting abruptly.
-
-
-7. RTOS Scheduling & Concurrency Models in Zephyr
--------------------------------------------------
-
-To support the multi-frequency scenarios above, ``zenbedded_rcl`` provides three distinct scheduling
-models in Zephyr RTOS.
-
-7.1 Model A: Single Master Tick with Integer Decimation (Rate Divisors)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-In Model A, a single high-priority Zephyr thread runs at the **Greatest Common Denominator (GCD)**
-frequency:
-
-.. math::
-
-   f_{\text{base}} = \text{GCD}(f_1, f_2, \ldots, f_N)
-
-Each component and controller is assigned an integer rate divisor:
+A controller *type* is written once, like a Zephyr driver. Its *instances* come from
+Devicetree (4.1):
 
 .. code-block:: cpp
 
-   void master_tick_thread_fn()
-   {
-     uint32_t tick_count = 0;
-     while (running) {
-       // 1 kHz tasks (divisor = 1)
-       if (tick_count % 1 == 0) {
-         fast_motor_component.write();
-       }
-       // 200 Hz tasks (divisor = 5)
-       if (tick_count % 5 == 0) {
-         imu_component.read();
-       }
-       // 100 Hz tasks (divisor = 10)
-       if (tick_count % 10 == 0) {
-         pendulum_controller.update();
-       }
-       // 50 Hz tasks (divisor = 20)
-       if (tick_count % 20 == 0) {
-         state_broadcaster.publish();
-       }
-       tick_count++;
-       k_sleep(K_MSEC(1));
+   #define DT_DRV_COMPAT zenbedded_pid_controller
+
+   #define ZB_PID_PARAMS(inst)                                       \
+     PidController::Params{                                          \
+       .joints = ZB_DT_STRING_ARRAY(inst, joints),                   \
+       .command_interface = DT_INST_PROP(inst, command_interface),   \
+       .state_interface = DT_INST_PROP(inst, state_interface),       \
+       .kp = ZB_MICRO(DT_INST_PROP(inst, kp_micro)),                 \
+       .ki = ZB_MICRO(DT_INST_PROP_OR(inst, ki_micro, 0)),           \
+       .kd = ZB_MICRO(DT_INST_PROP_OR(inst, kd_micro, 0)),           \
      }
-   }
 
-- **Advantages**: Minimal RAM (only 1 thread stack), zero mutexes, deterministic execution order.
-- **Limitations**: A slow or blocking sensor read delays the entire tick.
+   DT_INST_FOREACH_STATUS_OKAY_VARGS(ZB_CONTROLLER_DT_INST_DEFINE, PidController, ZB_PID_PARAMS)
 
-7.2 Model B: Multi-Domain Preemptive Threads with Lock-Free Double Buffers
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+``ZB_CONTROLLER_DT_INST_DEFINE(inst, Type, params_macro)`` has four jobs:
 
-In Model B, components and controllers are grouped into separate Zephyr threads prioritized by rate:
+- create a static ``Type`` instance holding its ``constexpr`` ``Params``;
+- place a descriptor in the controllers' iterable section, carrying the domain,
+  divisor, ``inactive-at-boot`` and ``chained-to``;
+- emit the build-time checks in 4.4;
+- use the node label as the controller's name (``jsb``, ``fwd``), as in
+  ``controllers.yaml``.
+
+``ZB_MICRO`` converts micro-units to ``real_t`` at compile time.
+
+A controller declares the interfaces it needs through
+``command_interface_configuration()`` and ``state_interface_configuration()``. These
+return names built from its ``Params``, matching the host API.
+
+**Parameters later.** Devicetree integers suit limits and rates but are clumsy for
+gains. A later phase (11, P7) can generate the ``Params`` struct from a
+``controllers.yaml``, preferably the same file the host ``controller_manager`` loads.
+That would allow real-number values and identical parameter names on host and MCU. The
+Devicetree node would then only bind the instance to its domain and interfaces. All of
+this is compile-time; runtime-settable parameters remain open question 3.
+
+5.6 ControllerManager and ResourceManager
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``ResourceManager``
+
+- owns component descriptors and interface storage;
+- resolves names to indices;
+- tracks which controller has claimed each command interface (one claimant per
+  interface);
+- applies joint limits in the write path, before ``write()``, so limits hold whichever
+  controller is active. This mirrors where newer ros2_control enforces them.
+
+``ControllerManager``
+
+- owns the rate domains and runs lifecycle transitions (5.2);
+- on each domain tick, runs ``read`` for that domain's components, then mirror copies,
+  then ``update`` for its controllers (in chain order), then ``write``;
+- runs the **command watchdog**: if no command arrives within ``command-timeout-ms``,
+  the target command interfaces drop to a safe value (zero velocity or acceleration) and
+  a diagnostic flag is set. This replaces the demo-local ``kCommandTimeoutMs`` logic;
+- counts overruns per domain (a tick taking longer than its period) and reports them on
+  the diagnostics channel.
+
+5.7 Controller porting plan
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Upstream names are kept wherever behaviour matches. This lets a host
+``controllers.yaml`` entry move to the MCU with minimal edits.
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 20 20 35
+   :widths: 28 12 60
 
-   * - Domain Thread
+   * - Upstream controller
      - Priority
-     - Frequency
-     - Responsibilities
-   * - **Fast Domain**
-     - ``K_PRIO_PREEMPT(0)``
-     - 400 Hz – 1 kHz
-     - High-speed encoder sampling, FOC/current commutation, step pulse generation.
-   * - **Control Domain**
-     - ``K_PRIO_PREEMPT(1)``
-     - 100 Hz
-     - Kinematics, LQR balancing, velocity PID, command processing.
-   * - **Telemetry Domain**
-     - ``K_PRIO_PREEMPT(3)``
-     - 10 – 50 Hz
-     - Zenoh publishing, JSON/CDR serialization, diagnostics.
-   * - **Background Domain**
-     - ``K_PRIO_PREEMPT(5)``
-     - 1 Hz
-     - Battery monitoring, LED strip animations, Wi-Fi keepalive.
+     - MCU port
+   * - ``joint_state_broadcaster``
+     - P0
+     - Writes claimed state interfaces into a ``ZenbeddedPublisher<JointStateCodec>``
+       (or a Tier 2 ``RawCodec``) at its own rate. Replaces the hand-written state
+       publishing in each demo.
+   * - ``forward_command_controller``
+     - P0
+     - Reads ``ZenbeddedSubscriber<JointCommandCodec>::take()`` each tick and writes
+       the values to claimed command interfaces. Uses ``accepted_count()`` for the
+       watchdog. This is the earlier "CommandSubscriberController", renamed for parity.
+   * - ``pid_controller``
+     - P1
+     - Chainable. Exports ``<joint>/<iface>`` reference interfaces. Feed-forward and
+       anti-windup follow ``control_toolbox::Pid``.
+   * - ``imu_sensor_broadcaster``
+     - P1
+     - Publishes ``sensor_msgs/Imu`` on its own channel.
+   * - ``joint_trajectory_controller``
+     - P2
+     - Subset only: a ring buffer of waypoints plus cubic or quintic interpolation (6.4).
+       No action server; the host keeps the action and streams waypoints.
+   * - ``diff_drive_controller``
+     - P2
+     - Kinematics and odometry on the MCU for mobile bases. Odometry published as
+       ``nav_msgs/Odometry``.
+   * - Not ported
+     - —
+     - ``admittance_controller``, ``gripper_action_controller``, MoveIt-side controllers.
+       They need actions, heavy maths or the full robot model.
 
-Communication between domains is handled via lock-free double buffering, completely preventing
-priority inversion.
-
-7.3 Model C: Timer ISR / DMA + Workqueue Hybrid
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-In Model C:
-
-- Hardware timer interrupts (or DMA completion interrupts) capture raw encoder/IMU counts with
-  sub-microsecond accuracy.
-- Processing is offloaded to a dedicated high-priority Zephyr workqueue (``k_work_submit_to_queue``).
-- Zenoh network tasks run on cooperative background work items.
-
-7.4 Comparative Trade-off Analysis
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 25 25 25
-
-   * - Metric
-     - Model A (Decimation)
-     - Model B (Multi-Domain)
-     - Model C (ISR/Workqueue)
-   * - **Jitter on Fast Loop**
-     - Moderate (I/O dependent)
-     - **Extremely Low (< 5 µs)**
-     - **Sub-microsecond**
-   * - **Memory Footprint**
-     - **Lowest (~1 KB stack)**
-     - Medium (~4-6 KB stacks)
-     - Medium (~3 KB stacks)
-   * - **Concurrency Safety**
-     - Trivial (Single thread)
-     - Requires Double Buffer
-     - Requires Atomic / Spinlock
-   * - **Recommended For**
-     - Simple boards, single-bus
-     - Multi-sensor robots
-     - High-speed motor drives
+Safety clamping is **not** a controller. It is the limits stage of the write path
+(5.6). Every command passes through it, so no controller can bypass it.
 
 
-8. Reference Implementation: Inverted Pendulum
-----------------------------------------------
-
-Applying this architecture to the `Inverted Pendulum Demo`_:
-
-1. **Devicetree Overlay**:
-   Defines ``motor_arm`` (stepper actuator @ 100 Hz) and ``pendulum_encoder`` (AS5600 sensor @ 400 Hz).
-2. **Execution Mapping (Model B)**:
-
-   - **400 Hz Thread**: Samples AS5600 via I2C, updates ``pendulum_joint/position`` and
-     ``pendulum_joint/velocity`` state interface views.
-   - **100 Hz Thread**: Evaluates ``InvertedPendulumController`` LQR equation, checks travel limits,
-     and commands ``stepper_ctrl_move_to()``.
-   - **100 Hz State Broadcaster**: Encodes state into Tier 2 packed struct and publishes to
-     ``rt/robot/state``.
-   - **Asynchronous Zenoh Subscriber**: Ingests command acceleration from host over ``rt/robot/cmd``.
-3. **Host Coupling**:
-   The host runs ``zenbedded_hardware_interface`` inside ``ros2_control``, seamlessly visualizing and
-   controlling the pendulum in RViz2 and Raylib.
-
-
-9. Summary & Next Steps
+6. Multi-Rate Scenarios
 -----------------------
 
-This architecture bridges the modular, declarative paradigm of ``ros2_control`` with the resource-constrained,
-deterministic execution environment of `Zephyr RTOS`_.
+6.1 Fast sensing, slower control, downsampled telemetry
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- Implementation tasks are tracked in the master project plan:
-  - ``HardwareComponent`` base class and ``ComponentManager`` lifecycle implementation in ``zenbedded_rcl``.
-  - Static Devicetree binding YAML definitions under ``zenbedded_rcl/dts/bindings/``.
-  - Multi-topic dynamic client registration in ``zenbedded_transport``.
+Inverted pendulum:
+
+- AS5600 sampled and velocity-filtered at 400 Hz in the ``fast`` domain.
+- Control at 100 Hz in the ``control`` domain.
+- State published at 50 Hz by ``joint_state_broadcaster`` running in ``control`` with a
+  divisor of 2.
+
+``pendulum_joint/*`` is owned by ``fast`` and mirrored into ``control`` once every 10 ms.
+
+6.2 Heterogeneous bus timings
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A 1 kHz step or PWM actuator, a 200 Hz I2C IMU and a 1 Hz battery ADC. If they shared a
+thread, a 3 ms I2C transaction would make the 1 kHz actuator overrun its period. The fix
+is to give each one its own domain. This is exactly the problem domains exist to solve.
+
+6.3 Cascaded controllers
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+A 100 Hz trajectory controller writes the reference interface of a 1 kHz velocity
+``pid_controller``. That controller writes the actuator's ``effort`` command. The FOC
+current loop stays inside the driver (see :ref:`rcl_arch_status`, out of scope). Because
+the cascade crosses a domain boundary, the reference value is mirrored as described
+in 5.4.
+
+6.4 Host trajectory, MCU interpolation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The host streams waypoints at 50 Hz. The MCU ``joint_trajectory_controller`` subset
+interpolates at 500 Hz. If a waypoint arrives late, the controller decelerates within
+the acceleration limits. If it is later than ``command-timeout-ms``, the watchdog
+(5.6) takes over.
+
+
+7. Scheduling
+-------------
+
+7.1 One model: rate domains
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The earlier draft offered three alternative models. They collapse into one:
+
+- **A rate domain** is one Zephyr thread with a fixed period. Inside a domain, members
+  run at integer divisors of the domain rate.
+- **Single-thread setup** (the old "Model A") is the special case of one domain. Its
+  tick rate must be the *least common multiple* of the member rates. Equivalently, the
+  tick period is the greatest common divisor of the periods. For 1000, 200, 100 and 50 Hz
+  that is a 1 kHz tick with divisors 1, 5, 10 and 20. The GCD of the *frequencies*
+  (50 Hz) would be wrong.
+- **Multi-domain setup** (the old "Model B") is the default for anything with more than
+  one bus.
+- **ISR and DMA capture** (the old "Model C") is a driver implementation detail inside a
+  ``HardwareComponent``, not a framework mode.
+
+7.2 Tick timing
+^^^^^^^^^^^^^^^
+
+Domain threads sleep to an **absolute** deadline so that errors do not accumulate. A
+relative ``k_sleep(K_MSEC(period))`` after the work drifts by the work's execution time
+on every tick.
+
+.. code-block:: cpp
+
+   int64_t next = k_uptime_ticks();
+   for (;;) {
+     next += domain.period_ticks;
+     run_tick(domain);
+     if (k_uptime_ticks() > next) { ++domain.overruns; }
+     k_sleep(K_TIMEOUT_ABS_TICKS(next));   // requires CONFIG_TIMEOUT_64BIT
+   }
+
+(A periodic ``k_timer`` plus ``k_timer_status_sync()`` would also work. Either way,
+overruns are counted.)
+
+7.3 Priorities
+^^^^^^^^^^^^^^
+
+Faster domains get higher priority (rate-monotonic). The Zenoh RX/lease threads and the
+``ZenbeddedExecutor`` sit *below* every control domain but above logging and background
+work. A network stall must never preempt control, and control must not starve the Zenoh
+lease long enough for the session to drop. Exact priority numbers go in Kconfig, not in
+this document.
+
+.. note::
+
+   Jitter targets (for example < 50 µs on a 1 kHz domain on ESP32-S3) are to be measured
+   with the harness in :doc:`benchmarking` before being quoted as properties of the
+   design.
+
+
+8. Network Integration and ZenbeddedExecutor
+--------------------------------------------
+
+8.1 Channels
+^^^^^^^^^^^^
+
+- Broadcaster and forwarder controllers are the only controllers that touch the network
+  layer. All other controllers see plain interfaces.
+- Channels follow the project's ``zenbedded/<robot>/<channel>`` convention, e.g.
+  ``zenbedded/inverted_pendulum/state`` and ``zenbedded/inverted_pendulum/cmd``.
+  Further channels (``imu``, ``diagnostics``, ``lifecycle``) follow the same pattern.
+  The Tier 1 or Tier 2 encoding is chosen per channel by its codec.
+
+8.2 Why an executor (issue #120)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+With PR #106 merged:
+
+- ``internal_sub_handler`` in ``zenoh_transport.c`` copies each sample into a static
+  ``rx_buf``. ``ZenbeddedSubscriberBase::on_transport_cb`` then writes it into the
+  subscriber's ``DoubleByteBuffer``, increments ``accepted_count`` and calls the user
+  callback. All of this happens **inside the zenoh-pico read task**, so a slow user
+  callback stalls packet reception and the lease task.
+- ``ZenbeddedPublisher::start_periodic_publish`` runs on the system workqueue. It calls
+  ``k_work_schedule(period)`` again *after* publishing, so each period is stretched by
+  the publish time and the rate drifts.
+- ``ZenbeddedClient``, still used by the demos, has its own publish thread with
+  ``period_ms = 1000 / freq``. That runs fast for rates that do not divide 1000 (400 Hz
+  becomes 500 Hz). This is latent: every current demo uses 100 Hz.
+- User callbacks (read task), periodic publishers (system workqueue) and the
+  application's own loop are three contexts touching the same state.
+
+The executor fixes all four, and it also gives the ``ControllerManager`` the
+"manager thread" that section 5.2 needs. PR #106 already has most of the pieces: the
+per-subscriber buffer, ``take()``, ``accepted_count()`` and the static-thunk dispatch.
+The executor mainly *moves where the callback runs*.
+
+8.3 Rate domains vs. the executor
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Two schedulers must not compete for the same work. The split is:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 39 39
+
+   * -
+     - Rate domain (section 7)
+     - ``ZenbeddedExecutor``
+   * - Driven by
+     - Time (fixed period, absolute deadline)
+     - Events (sample arrived, timer due, cancel)
+   * - Runs
+     - ``read`` / ``update`` / ``write``, mirrors, watchdog
+     - Subscription callbacks, telemetry timers, lifecycle and parameter requests
+   * - May block
+     - Never
+     - Briefly (e.g. an I2C probe during ``on_configure``)
+   * - Priority
+     - Highest band
+     - Below the control domains and zenoh-pico tasks
+
+Real-time code never runs inside the executor. Controllers read their inputs from
+buffers that executor callbacks (or the transport directly) fill. The command watchdog
+stays in the control domain, so a stalled executor still triggers a safe stop.
+
+An application that does not use ``ControllerManager`` (such as the current demos) can
+use the executor on its own, exactly as issue #120 sketches.
+
+8.4 Design
+^^^^^^^^^^
+
+**Executables.** ``ZenbeddedExecutor<N>`` holds up to ``N`` executables (``N <= 31``)
+in a fixed array. Subscriptions, timers and guard conditions (manual triggers) are all
+executables. Dispatch uses a static thunk, the same pattern as
+``ZenbeddedSubscriberBase``, with no ``virtual``.
+
+**Wake-up.** One ``k_event`` per executor, with one bit per executable and bit 31
+meaning "cancel":
+
+- Subscriptions are PR #106's ``ZenbeddedSubscriber<Codec>``. ``executor.add(sub)``
+  hands the subscriber its executor and bit index. From then on,
+  ``on_transport_cb`` writes the buffer and calls ``k_event_post(&ev, BIT(idx))``
+  instead of the user callback. It does no decoding and runs no user code. A subscriber
+  that is not added to an executor keeps #106's inline behaviour, so existing code does
+  not change.
+- On dispatch, the executor calls ``take()`` and passes the decoded ``Value`` to the
+  same ``CallbackFn`` signature #106 already uses.
+- The executor waits in ``k_event_wait(&ev, mask, false, timeout)``, where ``timeout`` is
+  the absolute deadline of the earliest timer. A single wait therefore covers both
+  messages and timers, with no polling.
+- After waking, it clears the bits it is about to handle and dispatches **in
+  registration order**. Order is fixed at registration, so it is deterministic.
+
+**Subscription buffering (depth).** Depth is chosen per subscription:
+
+- **Depth 1** (default) is #106's existing ``DoubleByteBuffer``, which keeps only the
+  latest value. If
+  two samples arrive before dispatch, the callback sees only the newer one. This is the
+  right behaviour for state and commands, and matches a ``KEEP_LAST(1)`` QoS.
+- **Depth N** is a new template parameter, ``ZenbeddedSubscriber<Codec, Depth>``,
+  backed by a ``k_msgq`` of ``N`` fixed-size slots, so nothing is coalesced. This
+  is for streams where every sample matters, such as trajectory waypoints (6.4). When
+  the queue is full, the oldest sample is dropped and a counter is incremented.
+
+**Timers.**
+
+- ``ZenbeddedTimer`` keeps an absolute next-deadline in ticks and advances it by whole
+  periods, so it never drifts.
+- If dispatch was late by more than one period, the callback runs **once**. The missed
+  periods are skipped and counted, which is what ``rclcpp`` does.
+- ``start_periodic_publish`` stays as API, but is reimplemented as a timer on the
+  default executor. This removes the workqueue drift. ``ZenbeddedClient``'s publish
+  thread becomes a timer too.
+
+**Spinning.**
+
+- ``spin()`` runs forever on the executor thread.
+- ``spin_some(timeout, max_events)`` handles at most ``max_events`` events and then
+  returns. This is for simple applications that drive the executor from their own loop.
+  The cap bounds how long one call can take, which matters if that loop is also the
+  control loop.
+- ``cancel()`` posts bit 31.
+
+**Autonomous mode.**
+
+- ``CONFIG_ZENBEDDED_EXECUTOR_THREAD`` provides a default executor whose thread is
+  defined with ``K_THREAD_DEFINE(..., K_FOREVER)``. #106's ``ZenbeddedNode::init()``
+  starts it once ``zenbedded_transport_init`` succeeds.
+- Issue #120 suggests starting it from ``SYS_INIT``. That runs before ``main()``, before
+  the network is up, and before C++ static objects are constructed, so the thread
+  would have to wait for all three anyway. Starting it on demand is simpler.
+
+**Registration.**
+
+- ``add_*`` is allowed before the first spin. After that it returns ``-EBUSY``, so the
+  executable table never changes while dispatch is running.
+- Removal happens only through ``cancel()`` followed by reconstruction. This matches
+  the lifecycle's cleanup step.
+
+.. code-block:: cpp
+
+   ZenbeddedNode node;
+   ZenbeddedExecutor<8> executor;
+
+   ZenbeddedSubscriber<JointCommandCodec> cmd_sub;           // depth 1 (default)
+   node.init();
+   node.create_subscriber(cmd_sub, "zenbedded/inverted_pendulum/cmd", on_cmd);
+
+   ZenbeddedTimer telemetry{K_MSEC(20), on_telemetry};       // replaces start_periodic_publish
+
+   executor.add(cmd_sub);
+   executor.add(telemetry);
+   executor.spin();   // or: start the default executor thread
+
+8.5 Priorities
+^^^^^^^^^^^^^^
+
+From highest to lowest: control rate domains, then zenoh-pico read and lease tasks,
+then the executor, then logging and background work.
+
+- The read task sits above the executor so that RX copies finish quickly. Its work per
+  sample is bounded by the RX buffer size.
+- It sits below the control domains, so network bursts cannot delay control.
+- ``zenbedded_transport_init`` currently passes default ``zp_task_*_options``. These
+  must be set explicitly, because the actual default priority depends on the zenoh-pico
+  Zephyr port.
+
+8.6 Later optimisation
+^^^^^^^^^^^^^^^^^^^^^^
+
+Each RX sample is copied twice: first into the transport's static ``rx_buf``, then into
+the subscription buffer. A receive-into callback (``zenbedded_recv_into_cb_t``) could
+let ``z_bytes_reader_read`` write straight into the subscription's write slot. This
+changes the C transport API, so it is deferred until benchmarks show the extra copy
+matters.
+
+8.7 Tests (``native_sim``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- Callbacks run on the executor thread: assert on ``k_current_get()``.
+- The RX handler returns within a bounded time with a deliberately slow user callback
+  registered.
+- Depth 1 coalesces and depth N preserves order, including the drop-oldest counter.
+- A timer shows no cumulative drift over 10 000 periods, and a forced late dispatch
+  counts the skipped periods.
+- ``cancel()`` unblocks ``spin()`` promptly, and ``add`` after spin returns ``-EBUSY``.
+
+
+9. Reference Implementation: Inverted Pendulum
+----------------------------------------------
+
+**Today** (``demos/inverted_pendulum``):
+
+- ``main.cpp`` runs a 400 Hz AS5600 sampling thread and a 100 Hz loop.
+- The loop reads the commanded *acceleration* from the host, integrates it into stepper
+  velocity, enforces the ±135° travel limit and a command timeout, and publishes state.
+- The LQR and energy-shaping controller runs on the host as
+  ``inverted_pendulum_controller``, loaded by ``controller_manager`` next to
+  ``joint_state_broadcaster``.
+
+**After migration:**
+
+1. The overlay in 4.2, now including the ``jsb`` and ``fwd`` controller nodes, replaces
+   the hand-written device lookups.
+2. ``StepperActuator`` (accepts acceleration commands, integrates to velocity, uses
+   ``stepper_ctrl_move_to``) and ``As5600JointSensor`` (filtered velocity) become
+   reusable components.
+3. ``joint_state_broadcaster`` and ``forward_command_controller`` replace the
+   hand-written publish and subscribe code.
+4. The watchdog and travel limit move into ``ControllerManager`` / ``ResourceManager``.
+5. The host side is unchanged: the same ``zenbedded_hardware_interface``, the same
+   topics and the same controllers.
+6. Optional later step: port the LQR as an MCU controller and switch the host to a
+   ``forward_command_controller``. This lets the two placements be compared directly.
+
+
+10. Open Questions
+------------------
+
+1. **Ops tables vs. virtual.** An ops-table pointer costs the same as a vptr. The gain
+   is ``constexpr`` placement and no RTTI, not size. Confirm the zero-vtable rule should
+   cover framework objects too, not just pub/sub.
+2. **Lifecycle control channel.** Should it be a Zenoh queryable (request/reply) or a
+   plain topic with an acknowledgement in diagnostics?
+3. **Parameters.** Should they stay compile-time only, or have a small runtime-settable
+   subset (PID gains) over Zenoh?
+4. **Float default.** Confirm ``float`` is acceptable for the pendulum's LQR if it moves
+   onto the MCU.
+5. **Executor capacity.** Is 31 executables per executor (one ``k_event`` word) enough,
+   or is a second word or a second executor needed for large robots?
+
+
+11. Delivery Plan
+-----------------
+
+The design is delivered in eight phases, starting from ``master`` with PR #106 merged. Each phase is one PR, or a short stack of PRs
+following the project's ``gh stack`` workflow. Each phase leaves ``master`` working and
+ends with something testable. The phases are ordered so that the inverted pendulum moves
+onto the framework as early as possible, and every later phase is proven on real
+hardware.
+
+11.1 Dependencies
+^^^^^^^^^^^^^^^^^
+
+.. code-block:: text
+
+   (master + PR #106)
+          │
+          ▼
+   P0 Executor ──► P1 Core types ──► P2 Managers + JSB/FCC ──► P3 Devicetree
+                                            │                        │
+                                            │                        ▼
+                                            │                  P4 Rate domains
+                                            │                        │
+                                            ▼                        ▼
+                                  P6 Lifecycle channel      P5 PID / IMU / chaining
+                                                                     │
+                                                                     ▼
+                                                            P7 JTC / diff-drive / params
+
+P6 needs only the managers (P2) and the executor (P0), so it can run in parallel with
+P3–P5.
+
+11.2 Milestones
+^^^^^^^^^^^^^^^
+
+- **M1 (end of P2)**: the pendulum balances through ``ControllerManager``, with
+  controllers registered in code. The host side is unchanged.
+- **M2 (end of P3)**: the pendulum is fully declared in Devicetree (4.2). ``main.cpp``
+  contains no device lookups and no publish, subscribe or watchdog code.
+- **M3 (end of P4)**: multi-rate execution, with jitter measured and published in
+  :doc:`benchmarking`.
+- **M4 (end of P5)**: a chained cascade (6.3) runs on hardware.
+
+11.3 Phases
+^^^^^^^^^^^
+
+**P0: ZenbeddedExecutor (issue #120).**
+
+- *Depends on*: nothing beyond the baseline (``master`` with PR #106 merged).
+- *Work*:
+
+  - ``zenbedded_rcl/include/zenbedded_rcl/executor.hpp`` and ``timer.hpp``: the section
+    8.4 design.
+  - Wake-up hook in ``zenoh_transport.c``.
+  - Kconfig for the default executor thread and for zenoh-pico task priorities (8.5).
+  - Attach ``ZenbeddedSubscriber`` to an executor (event post instead of an inline
+    callback).
+  - Add the ``Depth`` template parameter.
+  - Reimplement ``start_periodic_publish`` and ``ZenbeddedClient``'s publish thread as
+    timers.
+
+- *Done when*:
+
+  - The tests in 8.7 pass in Twister on ``native_sim``.
+  - The ``sine_wave`` and pendulum demos run unchanged from the user's point of view.
+  - A 400 Hz publish timer measures 400 Hz, not 500 Hz.
+
+- *Decisions*: open question 5 (executor capacity).
+
+**P1: Core types.**
+
+- *Depends on*: P0. Lifecycle transitions run on the executor thread.
+- *Work*:
+
+  - ``lifecycle.hpp``.
+  - ``interfaces.hpp``: handles and ``real_t``.
+  - ``hardware_component.hpp``: replace the empty header.
+  - ``controller_interface.hpp``.
+  - CRTP helpers that build the ops tables.
+  - New Ztest suite ``tests/rcl_core``.
+
+- *Done when*:
+
+  - Every lifecycle transition, including error paths and ``on_error``, is covered by a
+    test.
+  - The test binary contains no ``_ZTV*`` (vtable) symbols, checked with ``nm`` in CI.
+
+- *Decisions*: open questions 1 (vtable rule) and 4 (``float``).
+
+**P2: ResourceManager, ControllerManager, P0 controllers.**
+
+- *Depends on*: P1.
+- *Work*:
+
+  - ``ResourceManager``: interface table, claiming, the limits stage of the write path.
+  - ``ControllerManager``: single domain, autostart, command watchdog.
+  - ``joint_state_broadcaster`` and ``forward_command_controller`` on top of the
+    pub/sub API.
+  - A low-level ``ZB_CONTROLLER_DEFINE`` registration macro. Tests keep using it after
+    P3.
+  - Port the pendulum tier 1 demo, with ``StepperActuator`` and ``As5600JointSensor``
+    written in the demo for now.
+
+- *Done when*:
+
+  - The pendulum balances on hardware with the host LQR.
+  - ``test_inverted_pendulum_tier1_launch.py`` passes unchanged.
+  - Killing the host stops the stepper within ``command-timeout-ms``.
+  - The demo's hand-written publish, subscribe and watchdog code is deleted.
+
+**P3: Devicetree front end.**
+
+- *Depends on*: P2.
+- *Work*:
+
+  - Bindings (4.1) and ``dts_root`` in ``zephyr/module.yml``.
+  - ``DT_DRV_COMPAT`` instantiation for components and controllers (4.3, 5.5).
+  - Build-time checks (4.4) and Kconfig coupling (4.5).
+  - Move the generic stepper actuator and sensor-API joint sensor into
+    ``zenbedded_rcl``.
+  - Port the pendulum tier 2 demo as well.
+
+- *Done when*:
+
+  - Both pendulum tiers build from the overlay in 4.2 alone.
+  - A pytest runs ``west build`` on a set of deliberately invalid overlays and expects
+    each to fail with the matching assertion. Examples: a rate that does not divide the
+    domain rate, an unknown interface, two boot-active writers.
+  - A controller type absent from the overlay adds no code. Compare ``size`` output
+    with and without it.
+
+**P4: Multiple rate domains.**
+
+- *Depends on*: P3.
+- *Work*:
+
+  - Domain threads with absolute deadlines (7.2).
+  - Mirrors through ``DoubleBuffer`` (5.4).
+  - Per-domain overrun counters on a ``diagnostics`` channel.
+  - Benchmark harness.
+
+- *Done when*:
+
+  - The pendulum encoder runs in the ``fast`` domain through the framework, and the
+    demo's own encoder thread is deleted.
+  - Per-domain jitter histograms on ESP32-S3 are recorded in :doc:`benchmarking`.
+  - Only measured jitter numbers replace the targets in 7.3.
+
+**P5: Chaining and P1 controllers.**
+
+- *Depends on*: P4, for cross-domain cascades.
+- *Work*:
+
+  - Reference interfaces and ``chained-to``.
+  - ``pid_controller`` and ``imu_sensor_broadcaster``.
+  - Depth-N subscriptions (8.4).
+
+- *Done when*:
+
+  - A ``native_sim`` cascade test (trajectory → PID → mock actuator) tracks a step
+    within tolerance.
+  - One demo uses ``pid_controller`` on hardware.
+
+**P6: Lifecycle control channel.**
+
+- *Depends on*: P0 and P2.
+- *Work*:
+
+  - On the host, ``zenbedded_hardware_interface::on_activate`` / ``on_deactivate``
+    send requests.
+  - On the MCU, an executor subscription or queryable drives ``ControllerManager``
+    transitions.
+
+- *Done when*:
+
+  - ``ros2 control set_hardware_component_state <hw> inactive`` stops the MCU's
+    actuators, and ``active`` resumes them.
+  - A test asserts the round-trip.
+
+- *Decisions*: open question 2.
+
+**P7: P2 controllers and generated parameters.**
+
+- *Depends on*: P5.
+- *Work*:
+
+  - ``joint_trajectory_controller`` subset and ``diff_drive_controller``.
+  - A ``controllers.yaml`` → ``Params`` header generator (5.5), reusing the
+    ``zenbedded_schema`` code generation.
+  - Optional: port the pendulum LQR as an application controller and compare host vs.
+    MCU placement (section 9, step 6).
+
+- *Decisions*: open question 3.
+
+11.4 Every phase also includes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- A Twister scenario for the new code on ``native_sim``. Phases that touch a demo also
+  get an ESP32-S3 build-only scenario.
+- Updates to this document: move the finished item from "Proposed" to "Today" in
+  :ref:`rcl_arch_status`, and update ``zenbedded_rcl/doc/userdoc.rst``.
+- The pre-commit hooks used across the repo (clang-format, cpplint, cppcheck,
+  codespell, license headers).
+- A GitHub issue per phase, linked from #120 and from this section, so progress is
+  visible outside the document.
 
 
 .. _Zephyr RTOS: https://zephyrproject.org/
-.. _Zephyr Devicetree: https://docs.zephyrproject.org/latest/build/dts/index.html
-.. _ros2_control: https://control.ros.org/
 .. _Zenoh: https://zenoh.io/
-.. _Inverted Pendulum Demo: https://github.com/ros-controls/zenbedded/tree/main/demos/inverted_pendulum

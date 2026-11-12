@@ -45,5 +45,5 @@ Architecture & ros2_control Integration
 
 For an in-depth design specification detailing how ``zenbedded_rcl`` integrates
 ``HardwareComponent``, ``ControllerInterface``, ``ControllerManager``, Zephyr Devicetree
-(``zephyr dt``), and multi-rate execution scenarios, see the
+(``zephyr dt``), and multi-rate execution, see the proposed
 :ref:`rcl_architecture` guide.
