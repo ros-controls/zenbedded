@@ -155,9 +155,11 @@ All bindings live in ``zenbedded_rcl/dts/bindings/``. ``zephyr/module.yml`` gain
    ``joint-name``, ``driver`` (phandle), ``state-interfaces``, ``command-interfaces``,
    ``domain`` (phandle), limits.
 ``zenbedded,joint-sensor``
-   ``joint-name``, ``sensor`` (phandle), ``state-interfaces``, ``domain``, filter options.
+   ``joint-name``, ``sensor`` (phandle), ``state-interfaces``, ``domain``, filter options,
+   ``acquisition`` (``periodic``, ``notify``, ``offload`` or ``dma``; default
+   ``periodic``), ``stale-timeout-ms``.
 ``zenbedded,imu-sensor``
-   ``frame-id``, ``sensor`` (phandle), ``domain``.
+   ``frame-id``, ``sensor`` (phandle), ``domain``, ``acquisition``, ``stale-timeout-ms``.
 
 **Controllers**
 
@@ -195,6 +197,11 @@ example ``app,inverted-pendulum-controller``) and defines the type with the same
 Devicetree has no floating point, so every physical quantity is an integer in
 **micro-units** (µrad, µrad/s, µrad/s², µN·m). Property names carry the unit, e.g.
 ``max-velocity-urad-s``, so nobody has to guess the scale factor.
+
+A sensor's ``acquisition`` mode selects how its samples reach the framework (7.1, 8.4),
+and ``stale-timeout-ms`` is the age after which consumers must treat its value as
+invalid rather than merely old. Both are optional; the defaults are ``periodic`` and no
+timeout.
 
 4.2 Example (inverted pendulum, TMC2209 + AS5600)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -235,6 +242,8 @@ Devicetree has no floating point, so every physical quantity is an integer in
                domain = <&fast>;
                state-interfaces = "position", "velocity";
                velocity-filter-alpha-permille = <350>;
+               acquisition = "periodic";
+               stale-timeout-ms = <20>;
            };
 
            jsb: controller-0 {
@@ -469,8 +478,13 @@ The rule:
    the spinlock, never user code.
 3. The build fails, via a ``static_assert`` in the generated tables, if two domains
    claim the same command interface.
+4. A value that arrives from a notification-driven sensor (8.4) carries its acquisition
+   timestamp and a validity flag. A consumer may use it only while
+   ``now - acquired_at`` is within the component's ``stale-timeout-ms``; an expired value
+   is a fault to report, not a slightly old reading. Acquisition time, not publish time,
+   is what the host needs for fusion in Tier 1.
 
-This rule makes the existing spinlocked ``DoubleBuffer`` sufficient. No second
+These rules make the existing spinlocked ``DoubleBuffer`` sufficient. No second
 concurrency primitive is needed.
 
 5.5 Controllers
@@ -645,7 +659,10 @@ The earlier draft offered three alternative models. They collapse into one:
 - **Multi-domain setup** (the old "Model B") is the default for anything with more than
   one bus.
 - **ISR and DMA capture** (the old "Model C") is a driver implementation detail inside a
-  ``HardwareComponent``, not a framework mode.
+  ``HardwareComponent``, not a framework mode. Acquisition is either *rate-driven* (the
+  owning domain reads the sink on its tick) or *notification-driven* (a data-ready or
+  FIFO-watermark handler wakes the owning domain early). In both cases the handler does
+  no bus I/O and no logging: ISRs only raise, threads read (8.4).
 
 7.2 Tick timing
 ^^^^^^^^^^^^^^^
@@ -666,6 +683,13 @@ on every tick.
 
 (A periodic ``k_timer`` plus ``k_timer_status_sync()`` would also work. Either way,
 overruns are counted.)
+
+A finer tick improves ``k_sleep`` granularity, but every tick is a wake-up, so raising
+``CONFIG_SYS_CLOCK_TICKS_PER_SEC`` must be weighed against idle power on battery-powered
+nodes (``CONFIG_TICKLESS_KERNEL`` keeps idle ticks suppressed). The domain period and the
+tick rate are otherwise independent: an absolute-deadline sleep lands on the intended
+boundary as long as the tick is finer than the target jitter. The value belongs in P4
+(11.3), chosen from :doc:`benchmarking` measurements.
 
 7.3 Priorities
 ^^^^^^^^^^^^^^
@@ -798,6 +822,27 @@ meaning "cancel":
   default executor. This removes the workqueue drift. ``ZenbeddedClient``'s publish
   thread becomes a timer too.
 
+**Sources (notification-driven and slow sensors).** A sensor whose driver announces
+data-ready or crosses a FIFO watermark registers an executor *source*: one fixed
+callback and one event bit. The driver's handler, including an ISR, does nothing but
+``k_event_post(&ev, BIT(idx))``; the executor reads the sample on its own thread. Two
+sinks cover the acquisition policies:
+
+- ``LatestValue<T>`` keeps the newest sample with an acquisition timestamp and a
+  validity flag. A notification then only shortens latency; it never queues. This is the
+  sink a rate-driven domain polls (7.1).
+- ``SampleQueue<T, N>`` is a bounded SPSC ring for bursts where every sample matters, for
+  example an IMU FIFO. When full it drops the oldest sample and counts the drop.
+
+The number of events dispatched per pass is capped, so an event storm degrades by
+dropping samples rather than by delaying the executor. A sensor that can block for longer
+than a domain period does not get a source: it gets its own low-priority domain (6.2),
+which owns the bus and writes a ``LatestValue<T>``. Consumers compare that slot's
+acquisition timestamp against ``stale-timeout-ms`` (4.1).
+
+Subscription *depth*, described above, is inbound buffering. These sinks are the
+acquisition side, where the producer is a driver rather than the Zenoh read task.
+
 **Spinning.**
 
 - ``spin()`` runs forever on the executor thread.
@@ -870,6 +915,12 @@ matters.
 - A timer shows no cumulative drift over 10 000 periods, and a forced late dispatch
   counts the skipped periods.
 - ``cancel()`` unblocks ``spin()`` promptly, and ``add`` after spin returns ``-EBUSY``.
+- A source posted from a simulated ISR context is dispatched on the executor thread, and
+  a slow handler cannot block a second source.
+- A ``LatestValue`` sink behind a slow domain reports stale once its timeout passes, and
+  a full ``SampleQueue`` drops the oldest sample and increments its counter.
+- With more events pending than the per-pass cap, the surplus is deferred to the next
+  pass rather than dropped.
 
 
 9. Reference Implementation: Inverted Pendulum
@@ -914,6 +965,12 @@ matters.
    onto the MCU.
 5. **Executor capacity.** Is 31 executables per executor (one ``k_event`` word) enough,
    or is a second word or a second executor needed for large robots?
+6. **Source registration.** Does a notification-driven sensor register its event bit in
+   code, or does the Devicetree binding declare the source (4.1) so the bit is
+   generated? The latter keeps Devicetree as the single declaration site at the cost of
+   one more binding property.
+7. **Tick rate.** Which ``CONFIG_SYS_CLOCK_TICKS_PER_SEC`` and ``CONFIG_TICKLESS_KERNEL``
+   setting do the target boards settle on, given the idle-power tradeoff in 7.2?
 
 
 11. Delivery Plan
@@ -973,6 +1030,7 @@ P3–P5.
   - Attach ``ZenbeddedSubscriber`` to an executor (event post instead of an inline
     callback).
   - Add the ``Depth`` template parameter.
+  - ``add_source`` and the ``LatestValue<T>`` / ``SampleQueue<T, N>`` sinks (8.4).
   - Reimplement ``start_periodic_publish`` and ``ZenbeddedClient``'s publish thread as
     timers.
 
@@ -1054,6 +1112,8 @@ P3–P5.
   - Domain threads with absolute deadlines (7.2).
   - Mirrors through ``DoubleBuffer`` (5.4).
   - Per-domain overrun counters on a ``diagnostics`` channel.
+  - OFFLOAD domains for buses that can block (6.2), writing ``LatestValue`` sinks and
+    reporting staleness on the diagnostics channel.
   - Benchmark harness.
 
 - *Done when*:
