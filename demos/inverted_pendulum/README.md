@@ -89,7 +89,7 @@ sudo systemctl restart chrony
 ---
 
 ## Step 4: Building and Flashing Firmware
-
+> **Note (Wi-Fi builds):** Set `CONFIG_ZENBEDDED_ZENOH_LOCATOR="<HOST_IP>:7447"` in `prj.conf`.
 ### For Tier 1 (`inverted_pendulum_tier1`)
 
 ```bash
@@ -139,7 +139,7 @@ Build the ROS 2 workspace:
 
 ```bash
 source /opt/ros/lyrical/setup.bash
-colcon build --packages-select zenbedded_inverted_pendulum --symlink-install
+colcon build --packages-select zenbedded_inverted_pendulum zenbedded_hardware_interface --symlink-install
 source install/setup.bash
 ```
 
