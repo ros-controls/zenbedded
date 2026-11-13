@@ -167,7 +167,7 @@ Host Bringup (ROS 2)
 .. code-block:: bash
 
     source /opt/ros/lyrical/setup.bash
-    colcon build --packages-select zenbedded_inverted_pendulum --symlink-install
+    colcon build --packages-select zenbedded_inverted_pendulum zenbedded_hardware_interface --symlink-install
     source install/setup.bash
 
 2. Launch Stack
