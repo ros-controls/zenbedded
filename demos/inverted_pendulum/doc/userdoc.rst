@@ -98,7 +98,7 @@ Firmware Setup (ESP32-S3)
 
 The firmware supports both USB CDC-ECM (wired Ethernet over USB) and Wi-Fi
 transports via Zephyr snippets.
-
+> **Note (Wi-Fi builds):** Set `CONFIG_ZENBEDDED_ZENOH_LOCATOR="<HOST_IP>:7447"` in `prj.conf`
 1. Build Firmware
 ~~~~~~~~~~~~~~~~~
 
