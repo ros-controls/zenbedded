@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
     <name>zenbedded_inverted_pendulum</name>
-    <version>0.0.1</version>
+    <version>0.1.0</version>
     <description>launch for the Zenbedded inverted-pendulum demo</description>
     <maintainer email="itzkamalkant@gmail.com">kamal2730</maintainer>
     <license>Apache-2.0</license>

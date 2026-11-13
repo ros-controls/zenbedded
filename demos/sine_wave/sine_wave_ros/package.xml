@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
     <name>zenbedded_sine_wave</name>
-    <version>0.0.1</version>
+    <version>0.1.0</version>
     <description>launch for the Zenbedded sine-wave demo</description>
     <maintainer email="enejiohieku@gmail.com">Eneji Ohieku</maintainer>
     <license>Apache-2.0</license>

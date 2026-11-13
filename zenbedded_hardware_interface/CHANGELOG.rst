@@ -2,8 +2,8 @@
 Changelog for package zenbedded_hardware_interface
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.1.0 (2026-11-13)
+------------------
 * feat(hardware_interface): upgrade to RealtimeThreadSafeBox and on_export\_* lifecycle methods (`#103 <https://github.com/ros-controls/zephyr-zenoh-integration/issues/103>`_)
 * docs(rename): update repository name (`#93 <https://github.com/ros-controls/zephyr-zenoh-integration/issues/93>`_)
 * use Open Source Robotics Foundation, Inc. as the copyright holder everywhere (`#67 <https://github.com/ros-controls/zephyr-zenoh-integration/issues/67>`_)

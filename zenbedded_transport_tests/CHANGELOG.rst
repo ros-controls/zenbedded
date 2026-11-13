@@ -2,8 +2,8 @@
 Changelog for package zenbedded_transport_tests
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+0.1.0 (2026-11-13)
+------------------
 * use Open Source Robotics Foundation, Inc. as the copyright holder everywhere (`#67 <https://github.com/ros-controls/zephyr-zenoh-integration/issues/67>`_)
 * Refactor/port schema to transport (`#61 <https://github.com/ros-controls/zephyr-zenoh-integration/issues/61>`_)
 * Feature/lyrical e2e baseline (`#59 <https://github.com/ros-controls/zephyr-zenoh-integration/issues/59>`_)
