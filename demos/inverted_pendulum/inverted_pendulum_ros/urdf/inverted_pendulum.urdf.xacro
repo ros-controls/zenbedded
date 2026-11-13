@@ -5,6 +5,8 @@
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="inverted_pendulum">
     <xacro:arg name="use_mock_hardware" default="false" />
+    <xacro:arg name="tier" default="2" />
+    <xacro:arg name="enable_kicking" default="true" />
 
     <material name="enclosure">
         <color rgba="0. 0.6 0.6 1" />
@@ -105,16 +107,6 @@
     </joint>
 
     <ros2_control name="ZenbeddedSystem" type="system">
-        <xacro:unless value="$(arg use_mock_hardware)">
-            <hardware>
-                <plugin>zenbedded_hardware_interface/ZenbeddedHardware</plugin>
-                <param name="schema_path">$(find zenbedded_inverted_pendulum)/config/interface_schema.yaml</param>
-                <param name="zenoh_mode">client</param>
-                <param name="zenoh_endpoint">tcp/127.0.0.1:7447</param>
-                <param name="state_topic">zenbedded/inverted_pendulum/state</param>
-                <param name="command_topic">zenbedded/inverted_pendulum/cmd</param>
-            </hardware>
-        </xacro:unless>
         <xacro:if value="$(arg use_mock_hardware)">
             <hardware>
                 <plugin>mock_pendulum_hardware/MockPendulumHardware</plugin>
@@ -158,8 +150,38 @@
                 <!-- Timing -->
                 <param name="sim_speed_factor">1.0</param>
                 <param name="max_substep">5.0e-4</param>
+
+                <!-- Periodic disturbance kicks -->
+                <param name="kick_enable">$(arg enable_kicking)</param>
+                <param name="first_kick_delay">3.0</param>
+                <param name="kick_interval_mean">4.0</param>
+                <param name="kick_interval_jitter">1.0</param>
+                <param name="kick_magnitude_min">1.8</param>
+                <param name="kick_magnitude_max">3.5</param>
+                <param name="topple_kick_chance">0.25</param>
+                <param name="topple_magnitude_min">5.5</param>
+                <param name="topple_magnitude_max">8.0</param>
             </hardware>
         </xacro:if>
+        <xacro:unless value="$(arg use_mock_hardware)">
+            <xacro:if value="${'$(arg tier)' == '1'}">
+                <hardware>
+                    <plugin>zenbedded_inverted_pendulum/InvertedPendulumTier1Hardware</plugin>
+                    <param name="state_topic">/zenbedded/inverted_pendulum/state</param>
+                    <param name="command_topic">/zenbedded/inverted_pendulum/cmd</param>
+                </hardware>
+            </xacro:if>
+            <xacro:unless value="${'$(arg tier)' == '1'}">
+                <hardware>
+                    <plugin>zenbedded_hardware_interface/ZenbeddedHardware</plugin>
+                    <param name="schema_path">$(find zenbedded_inverted_pendulum)/config/interface_schema.yaml</param>
+                    <param name="zenoh_mode">client</param>
+                    <param name="zenoh_endpoint">tcp/127.0.0.1:7447</param>
+                    <param name="state_topic">zenbedded/inverted_pendulum/state</param>
+                    <param name="command_topic">zenbedded/inverted_pendulum/cmd</param>
+                </hardware>
+            </xacro:unless>
+        </xacro:unless>
 
         <joint name="motor_joint">
             <state_interface name="position"/>

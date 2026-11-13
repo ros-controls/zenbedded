@@ -1,8 +1,8 @@
-menu "Inverted Pendulum Tier1 Demo"
+menu "Inverted Pendulum Tier 1 Demo"
 
-config NTP_SERVER
-    string "ip address of ntp server"
-    default "127.0.0.1"
+config ENCODER_SAMPLING_THREAD_PRIORITY
+    int "Priority for the magnetic encoder's sampling thread"
+    default 0
 
 endmenu
 
