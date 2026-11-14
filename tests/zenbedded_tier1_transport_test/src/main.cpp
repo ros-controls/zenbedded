@@ -76,7 +76,14 @@ int main(void)
   // --- PUBLISHER SETUP ---
   zcdr_joint_state_ctx_t ctx_joints;
   uint8_t buf_joints[512] = {0};
-  zcdr_init_joint_state(&ctx_joints, "base_link", chassis_joints, 2, buf_joints);
+  if (
+    zcdr_init_joint_state(
+      &ctx_joints, "base_link", chassis_joints, 2, buf_joints, sizeof(buf_joints)) != 0)
+  {
+    printf("[FATAL] State CDR buffer initialization failed!\n");
+    zenbedded_transport_destroy();
+    return -1;
+  }
 
   zenbedded_pub_t pub_joints =
     zenbedded_transport_declare_publisher("joint_states", "sensor_msgs::msg::dds_::JointState_");
@@ -90,7 +97,14 @@ int main(void)
 #ifdef CONFIG_TIER1_TEST_INGRESS
   // --- SUBSCRIBER SETUP ---
   uint8_t dummy_1[256] = {0};
-  zcdr_init_joint_command(&ctx_sub_1, "base_link", chassis_joints, 2, "position", dummy_1);
+  if (
+    zcdr_init_joint_command(
+      &ctx_sub_1, "base_link", chassis_joints, 2, "position", dummy_1, sizeof(dummy_1)) != 0)
+  {
+    printf("[FATAL] Command CDR buffer initialization failed!\n");
+    zenbedded_transport_destroy();
+    return -1;
+  }
 
   zenbedded_transport_declare_subscriber(
     "joint_commands", "control_msgs::msg::dds_::JointCommand_", cmd_1_rx_callback, &ctx_sub_1);
