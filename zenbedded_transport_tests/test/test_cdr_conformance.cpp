@@ -61,7 +61,9 @@ TEST(CdrConformance, zcdr_reads_a_ros2_serialized_joint_state)
 
   uint8_t layout_buffer[256] = {0};
   zcdr_joint_state_ctx_t ctx;
-  zcdr_init_joint_state(&ctx, kFrameId, kJointNames, kNumJoints, layout_buffer);
+  ASSERT_EQ(
+    0, zcdr_init_joint_state(
+         &ctx, kFrameId, kJointNames, kNumJoints, layout_buffer, sizeof(layout_buffer)));
 
   int32_t sec = 0;
   uint32_t nanosec = 0;
@@ -85,7 +87,8 @@ TEST(CdrConformance, ros2_reads_a_zcdr_serialized_joint_state)
 {
   uint8_t buffer[256] = {0};
   zcdr_joint_state_ctx_t ctx;
-  zcdr_init_joint_state(&ctx, kFrameId, kJointNames, kNumJoints, buffer);
+  ASSERT_EQ(
+    0, zcdr_init_joint_state(&ctx, kFrameId, kJointNames, kNumJoints, buffer, sizeof(buffer)));
   zcdr_serialize_joint_state(
     &ctx, kStampSec, kStampNanosec, kPositions, kVelocities, kEfforts, buffer);
 

@@ -47,10 +47,13 @@ extern "C"
    * @param joint_names Array of joint name strings.
    * @param num_joints The number of joints in the arrays.
    * @param out_buffer Pre-allocated byte buffer to hold the initialized CDR template.
+   * @param buffer_size Capacity of out_buffer in bytes, including all numeric arrays.
+   * @return 0 on success, -ENOMEM if the complete payload does not fit, or -EINVAL for
+   * invalid pointers. On failure, ctx and out_buffer are unchanged.
    */
-  void zcdr_init_joint_state(
+  int zcdr_init_joint_state(
     zcdr_joint_state_ctx_t * ctx, const char * frame_id, const char ** joint_names,
-    uint32_t num_joints, uint8_t * out_buffer);
+    uint32_t num_joints, uint8_t * out_buffer, size_t buffer_size);
 
   /**
    * @brief Serializes ROS 2 JointState into the pre-calculated CDR network buffer.
@@ -106,10 +109,13 @@ extern "C"
    * @param num_joints The number of joints in the arrays.
    * @param interface_name The hardware interface name string.
    * @param out_buffer Pre-allocated byte buffer to hold the initialized CDR template.
+   * @param buffer_size Capacity of out_buffer in bytes, including all numeric arrays.
+   * @return 0 on success, -ENOMEM if the complete payload does not fit, or -EINVAL for
+   * invalid pointers. On failure, ctx and out_buffer are unchanged.
    */
-  void zcdr_init_joint_command(
+  int zcdr_init_joint_command(
     zcdr_joint_command_ctx_t * ctx, const char * frame_id, const char ** joint_names,
-    uint32_t num_joints, const char * interface_name, uint8_t * out_buffer);
+    uint32_t num_joints, const char * interface_name, uint8_t * out_buffer, size_t buffer_size);
 
   /**
    * @brief Serializes ROS 2 JointCommand into the pre-calculated CDR network buffer.

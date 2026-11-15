@@ -28,6 +28,14 @@ if(BUILD_TESTING)
     rclcpp::rclcpp
     ${sensor_msgs_TARGETS}
   )
+
+  ament_add_gtest(test_serialization_bounds
+    test/test_serialization_bounds.cpp
+  )
+  target_include_directories(test_serialization_bounds PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../zenbedded_rcl/include
+  )
+  target_link_libraries(test_serialization_bounds zcdr_under_test)
 endif()
 
 ament_package()
