@@ -1,7 +1,6 @@
 if(CONFIG_ZENBEDDED_RCL)
     zephyr_library_named(zenbedded_rcl)
     zephyr_library_sources(
-        src/hardware_component.cpp
         src/zenbedded_client.cpp
     )
     zephyr_include_directories(include)
