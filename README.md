@@ -21,12 +21,11 @@ Tier 1 uses CDR-encoded ROS 2 messages; Tier 2 uses schema-packed payloads.
 | ROS 2 Distro | Branch | Host build | Documentation |
 | :---------: | :----: | :--------: | :-----------: |
 | **Lyrical** | [`master`](https://github.com/ros-controls/zenbedded/tree/master) | [![Lyrical Binary Build](https://github.com/ros-controls/zenbedded/actions/workflows/lyrical-binary-build.yml/badge.svg?branch=master)](https://github.com/ros-controls/zenbedded/actions/workflows/lyrical-binary-build.yml?branch=master) | [Documentation](https://control.ros.org/rolling/doc/zephyr-zenoh-integration/doc/index.html) |
-| **Kilted** | [`master`](https://github.com/ros-controls/zenbedded/tree/master) | ![source build](https://img.shields.io/badge/build-source_build-blue)| [Source build](doc/supported_distributions.rst) |
 | **Jazzy** | [`master`](https://github.com/ros-controls/zenbedded/tree/master) | ![source build](https://img.shields.io/badge/build-source_build-blue) | [Source build](doc/supported_distributions.rst) |
 | **Humble and older** | — | ![unsupported](https://img.shields.io/badge/build-unsupported-red) | — |
 
-Lyrical is validated end-to-end. Kilted and Jazzy use the same `master` sources; their
-CI lanes are planned after the first release.
+Lyrical is validated end-to-end. Jazzy uses the same `master` sources; its
+CI lane is planned after the first release.
 
 ## Supported hardware
 
@@ -110,5 +109,5 @@ Apache-2.0. See [`LICENSE`](LICENSE).
 ## Known limitations
 
 - Packages are built from source; there is no rosdistro release yet.
-- Only Lyrical is CI-tested; Kilted and Jazzy are source builds.
+- Only Lyrical is CI-tested; Jazzy is a source build.
 - A standalone Zephyr workspace is not supported yet; use the development container.
